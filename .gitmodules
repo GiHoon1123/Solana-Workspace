@@ -1,0 +1,3 @@
+[submodule "prc"]
+	path = prc
+	url = https://github.com/orakle-7th-sda/solana-anchor-examples.git
