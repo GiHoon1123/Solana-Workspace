@@ -1,0 +1,27 @@
+# Anchor
+.anchor
+target
+**/*.rs.bk
+
+# Node
+node_modules
+.yarn
+
+# Solana
+test-ledger
+deployed-addresses.json
+
+# Lock files (선택적 - 팀 프로젝트면 포함하는 게 좋음)
+# Cargo.lock
+# package-lock.json
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode
+.idea
+
+# Logs
+*.log
+

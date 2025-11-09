@@ -1,0 +1,17 @@
+# Build outputs
+target/
+node_modules/
+.anchor/
+
+# IDL and types
+**/types/
+**/idl/
+
+# Test ledger
+test-ledger/
+
+# Lockfiles
+Cargo.lock
+package-lock.json
+yarn.lock
+
