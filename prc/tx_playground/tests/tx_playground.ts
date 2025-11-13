@@ -1,8 +1,5 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program } from "@coral-xyz/anchor";
-import { BN } from "@coral-xyz/anchor";
-import { PublicKey, SystemProgram } from "@solana/web3.js";
-import { expect } from "chai";
+import { BN, Program } from "@coral-xyz/anchor";
 import {
   TOKEN_PROGRAM_ID,
   createMint,
@@ -10,6 +7,8 @@ import {
   getOrCreateAssociatedTokenAccount,
   mintTo,
 } from "@solana/spl-token";
+import { PublicKey, SystemProgram } from "@solana/web3.js";
+import { expect } from "chai";
 import { TxPlayground } from "../target/types/tx_playground";
 
 const AGGREGATOR_NAME_LEN = 16;
@@ -96,14 +95,13 @@ describe("tx_playground", () => {
       wallet.publicKey
     ));
 
-    ({
-      address: destinationTokenAccount,
-    } = await getOrCreateAssociatedTokenAccount(
-      provider.connection,
-      wallet.payer,
-      mint,
-      destinationOwner.publicKey
-    ));
+    ({ address: destinationTokenAccount } =
+      await getOrCreateAssociatedTokenAccount(
+        provider.connection,
+        wallet.payer,
+        mint,
+        destinationOwner.publicKey
+      ));
 
     await mintTo(
       provider.connection,
@@ -126,7 +124,16 @@ describe("tx_playground", () => {
       .rpc();
 
     const configAccount = await program.account.config.fetch(configPda);
-    expect(configAccount.owner.toBase58()).to.equal(wallet.publicKey.toBase58());
+    console.log("configAccount", {
+      owner: configAccount.owner.toBase58(),
+      aggregatorCount: configAccount.aggregatorCount,
+      aggregators: configAccount.aggregators.map((agg) =>
+        unwrapAggregator(agg)
+      ),
+    });
+    expect(configAccount.owner.toBase58()).to.equal(
+      wallet.publicKey.toBase58()
+    );
     expect(configAccount.aggregatorCount).to.equal(2);
     expect(unwrapAggregator(configAccount.aggregators[0])).to.deep.equal(
       aggregatorManual.data
@@ -148,6 +155,10 @@ describe("tx_playground", () => {
       .rpc();
 
     const userState = await program.account.userState.fetch(userStatePda);
+    console.log("userState after init", {
+      lastTxId: userState.lastTxId.toNumber(),
+      bump: userState.bump,
+    });
     expect(userState.lastTxId.toNumber()).to.equal(0);
   });
 
@@ -155,11 +166,7 @@ describe("tx_playground", () => {
     const logId = 1;
     const logSeed = toLEBytes(logId);
     const [txLogPda] = PublicKey.findProgramAddressSync(
-      [
-        TX_LOG_SEED_PREFIX,
-        wallet.publicKey.toBuffer(),
-        logSeed,
-      ],
+      [TX_LOG_SEED_PREFIX, wallet.publicKey.toBuffer(), logSeed],
       program.programId
     );
     console.log("derived tx_log", txLogPda.toBase58());
@@ -185,16 +192,39 @@ describe("tx_playground", () => {
       ix.keys.map((k) => k.pubkey.toBase58())
     );
 
+    const userStateBefore = await program.account.userState.fetch(userStatePda);
+    const userBalanceBefore = await getAccount(
+      provider.connection,
+      userTokenAccount
+    );
+    const destinationBalanceBefore = await getAccount(
+      provider.connection,
+      destinationTokenAccount
+    );
+    console.log("transfer before", {
+      userStateLastTxId: userStateBefore.lastTxId.toNumber(),
+      userBalance: Number(userBalanceBefore.amount),
+      destinationBalance: Number(destinationBalanceBefore.amount),
+    });
+
     await provider.sendAndConfirm(new anchor.web3.Transaction().add(ix));
 
     const userState = await program.account.userState.fetch(userStatePda);
     expect(userState.lastTxId.toNumber()).to.equal(logId);
 
     const logAccount = await program.account.txLog.fetch(txLogPda);
+    console.log("transfer txLog", {
+      mode: logAccount.mode,
+      amountIn: logAccount.amountIn.toString(),
+      amountOut: logAccount.amountOut.toString(),
+      timestamp: logAccount.timestamp.toString(),
+    });
     expect(logAccount.mode).to.deep.equal({ transfer: {} });
     expect(logAccount.amountIn.toNumber()).to.equal(amount.toNumber());
     expect(logAccount.amountOut.toNumber()).to.equal(amount.toNumber());
-    expect(unwrapAggregator(logAccount.aggregator)).to.deep.equal(ZERO_AGGREGATOR);
+    expect(unwrapAggregator(logAccount.aggregator)).to.deep.equal(
+      ZERO_AGGREGATOR
+    );
 
     const userBalance = await getAccount(provider.connection, userTokenAccount);
     const destinationBalance = await getAccount(
@@ -204,22 +234,28 @@ describe("tx_playground", () => {
 
     expect(Number(userBalance.amount)).to.equal(900_000_000);
     expect(Number(destinationBalance.amount)).to.equal(100_000_000);
+    console.log("transfer after", {
+      userStateLastTxId: userState.lastTxId.toNumber(),
+      userBalance: Number(userBalance.amount),
+      destinationBalance: Number(destinationBalance.amount),
+    });
   });
 
   it("executes manual swap and logs result", async () => {
     const logId = 2;
     const logSeed = toLEBytes(logId);
     const [txLogPda] = PublicKey.findProgramAddressSync(
-      [
-        TX_LOG_SEED_PREFIX,
-        wallet.publicKey.toBuffer(),
-        logSeed,
-      ],
+      [TX_LOG_SEED_PREFIX, wallet.publicKey.toBuffer(), logSeed],
       program.programId
     );
 
     const amountIn = new BN(50_000_000);
     const expectedOut = new BN(48_000_000);
+
+    const before = await program.account.userState.fetch(userStatePda);
+    console.log("manual swap before", {
+      lastTxId: before.lastTxId.toNumber(),
+    });
 
     await program.methods
       .manualSwap(amountIn, expectedOut, Array.from(logSeed))
@@ -239,29 +275,46 @@ describe("tx_playground", () => {
     expect(userState.lastTxId.toNumber()).to.equal(logId);
 
     const logAccount = await program.account.txLog.fetch(txLogPda);
+    console.log("manual swap txLog", {
+      mode: logAccount.mode,
+      amountIn: logAccount.amountIn.toString(),
+      amountOut: logAccount.amountOut.toString(),
+      timestamp: logAccount.timestamp.toString(),
+    });
     expect(logAccount.mode).to.deep.equal({ manualSwap: {} });
     expect(logAccount.amountIn.toNumber()).to.equal(amountIn.toNumber());
     expect(logAccount.amountOut.toNumber()).to.equal(expectedOut.toNumber());
-    expect(unwrapAggregator(logAccount.aggregator)).to.deep.equal(ZERO_AGGREGATOR);
+    expect(unwrapAggregator(logAccount.aggregator)).to.deep.equal(
+      ZERO_AGGREGATOR
+    );
+    console.log("manual swap after", {
+      lastTxId: userState.lastTxId.toNumber(),
+    });
   });
 
   it("executes aggregator swap and logs aggregator name", async () => {
     const logId = 3;
     const logSeed = toLEBytes(logId);
     const [txLogPda] = PublicKey.findProgramAddressSync(
-      [
-        TX_LOG_SEED_PREFIX,
-        wallet.publicKey.toBuffer(),
-        logSeed,
-      ],
+      [TX_LOG_SEED_PREFIX, wallet.publicKey.toBuffer(), logSeed],
       program.programId
     );
 
     const amountIn = new BN(25_000_000);
     const minAmountOut = new BN(24_000_000);
 
+    const before = await program.account.userState.fetch(userStatePda);
+    console.log("aggregator swap before", {
+      lastTxId: before.lastTxId.toNumber(),
+    });
+
     await program.methods
-      .aggregatorSwap(aggregatorRoute, amountIn, minAmountOut, Array.from(logSeed))
+      .aggregatorSwap(
+        aggregatorRoute,
+        amountIn,
+        minAmountOut,
+        Array.from(logSeed)
+      )
       .accounts({
         authority: wallet.publicKey,
         config: configPda,
@@ -278,11 +331,21 @@ describe("tx_playground", () => {
     expect(userState.lastTxId.toNumber()).to.equal(logId);
 
     const logAccount = await program.account.txLog.fetch(txLogPda);
+    console.log("aggregator swap txLog", {
+      mode: logAccount.mode,
+      amountIn: logAccount.amountIn.toString(),
+      amountOut: logAccount.amountOut.toString(),
+      aggregator: unwrapAggregator(logAccount.aggregator),
+      timestamp: logAccount.timestamp.toString(),
+    });
     expect(logAccount.mode).to.deep.equal({ aggregatorSwap: {} });
     expect(unwrapAggregator(logAccount.aggregator)).to.deep.equal(
       aggregatorRoute.data
     );
     expect(logAccount.amountIn.toNumber()).to.equal(amountIn.toNumber());
     expect(logAccount.amountOut.toNumber()).to.equal(minAmountOut.toNumber());
+    console.log("aggregator swap after", {
+      lastTxId: userState.lastTxId.toNumber(),
+    });
   });
 });

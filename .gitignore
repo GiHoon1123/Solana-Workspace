@@ -10,3 +10,6 @@
 
 # Temporary directories
 prc_temp/
+
+# Node modules
+node_modules/
