@@ -1,4 +1,5 @@
 use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Token, TokenAccount, Transfer as SplTransfer};
 
 /// Maximum number of aggregators allowed.
 /// 허용할 어그리게이터의 최대 개수.
@@ -8,34 +9,51 @@ pub const MAX_AGGREGATORS: usize = 2;
 /// 각 어그리게이터 이름을 저장할 때 사용할 고정 바이트 길이.
 pub const AGGREGATOR_NAME_LEN: usize = 16;
 
+/// Human-readable prefix when creating TxLog PDA seeds.
+/// TxLog PDA 씨드를 생성할 때 사용할 사람이 읽기 좋은 접두어.
+pub const TX_LOG_SEED_PREFIX: &[u8] = b"tx_log";
+
 declare_id!("BboWCo5mn96epXaSmq3prjAhx1tKkFZdjjyGgMGVcckW");
 
 #[program]
 pub mod tx_playground {
     use super::*;
 
-    /// Admin initializes config and registers allowed aggregators.
-    /// 관리자가 컨피그 계정을 초기화하고 허용된 어그리게이터를 등록한다.
+    // 프로그램 설정을 초기화 한다. (owner, whitelisted, aggregator)
+    // initialize program configuration (owner, whitelisted, aggregator)
     pub fn initialize_config(
         ctx: Context<InitializeConfig>,
         aggregators: Vec<AggregatorName>,
     ) -> Result<()> {
-        msg!("initialize_config called. TODO: implement logic");
+        msg!("initialize_config called: setting program configuration");
 
-        // Reject when provided aggregators exceed the allowed maximum.
-        // 전달된 어그리게이터 수가 허용 범위를 넘으면 에러 처리.
+        // Throw error if too many aggregators are provided
         require!(
             aggregators.len() <= MAX_AGGREGATORS,
             TxPlaygroundError::TooManyAggregators
         );
 
+        // Throw error if no aggregators are provided
+        require!(
+            !aggregators.is_empty(),
+            TxPlaygroundError::NoAggregatorProvided
+        );
+
+        // Get authority from context
+        let authority = &ctx.accounts.authority;
         let config = &mut ctx.accounts.config;
-        config.owner = ctx.accounts.authority.key();
+
+        // Set owner, bump, aggregator_count
+        config.owner = authority.key();
         config.bump = ctx.bumps.config;
         config.aggregator_count = aggregators.len() as u8;
 
-        // Copy each aggregator name into the fixed-length array.
-        // 각 어그리게이터 이름을 고정 길이 배열에 복사.
+        // Set AggregatorName to default
+        for slot in config.aggregators.iter_mut() {
+            *slot = AggregatorName::default();
+        }
+
+        // Set aggregator names
         for (idx, name) in aggregators.into_iter().enumerate() {
             config.aggregators[idx] = name;
         }
@@ -43,222 +61,371 @@ pub mod tx_playground {
         Ok(())
     }
 
-    /// Basic transfer; later we will log the transaction details.
-    /// 기본 토큰/SOL 전송; 이후 트랜잭션 로그를 남길 예정이다.
-    pub fn transfer(ctx: Context<Transfer>, _amount: u64) -> Result<()> {
-        msg!("transfer called. TODO: implement token/native transfer logic");
+    // 사용자 상태를 초기화 한다.
+    // Initialize user state 
+    pub fn initialize_user_state(ctx: Context<InitializeUserState>) -> Result<()> {
+        msg!("initialize_user_state called: creating per-user state");
+
+        
+        // Get user state from context
+        let user_state = &mut ctx.accounts.user_state;
+        user_state.last_tx_id = 0;
+        user_state.bump = ctx.bumps.user_state;
+
         Ok(())
     }
 
-    /// Manual swap supplied with off-chain price calculations.
-    /// 오프체인 가격 계산을 받아 수동 스왑을 수행한다.
+   // Transfer tokens from user to destination
+    pub fn transfer(
+        ctx: Context<Transfer>,
+        amount: u64,
+        log_seed: [u8; 8],
+    ) -> Result<()> {
+        // Throw error if amount is not greater than 0 
+        msg!("transfer called: moving SPL tokens");
+        require!(amount > 0, TxPlaygroundError::InvalidAmount);
+
+        // Convert log_seed to log_id
+        let log_id = u64::from_le_bytes(log_seed);
+
+        // Check if log_id is valid 
+        let user_state = &mut ctx.accounts.user_state;
+        user_state.consume_log_id(log_id)?;
+
+        msg!("tx_log account provided: {}", ctx.accounts.tx_log.key());
+        msg!("log_id value: {}", log_id);
+
+        
+        // Each of Solana Fuctions exists as a separate program, so we need to use CpiContext to call them.
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SplTransfer {
+                    from: ctx.accounts.user_source.to_account_info(),
+                    to: ctx.accounts.destination_token.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        // Get clock from Solana runtime timestamp
+        let clock = Clock::get()?;
+
+        // Record transaction metadata into on-chain Txlog account
+        let tx_log = &mut ctx.accounts.tx_log;
+
+        tx_log.user = ctx.accounts.authority.key();
+        tx_log.mode = TxMode::Transfer;
+        tx_log.aggregator = AggregatorName::default();
+        tx_log.amount_in = amount;
+        tx_log.amount_out = amount;
+        tx_log.timestamp = clock.unix_timestamp;
+        tx_log.bump = ctx.bumps.tx_log;
+
+        Ok(())
+    }
+
+    // Swap tokens manually
     pub fn manual_swap(
         ctx: Context<ManualSwap>,
-        _amount_in: u64,
-        _min_amount_out: u64,
+        amount_in: u64,
+        expected_amount_out: u64, // Expected amount out after swap 
+        log_seed: [u8; 8],
     ) -> Result<()> {
-        msg!("manual_swap called. TODO: implement manual swap execution");
+        msg!("manual_swap called: executing direct swap");
+        require!(amount_in > 0, TxPlaygroundError::InvalidAmount);
+        require!(expected_amount_out > 0, TxPlaygroundError::InvalidAmount);
+
+        let log_id = u64::from_le_bytes(log_seed);
+        let user_state = &mut ctx.accounts.user_state;
+        user_state.consume_log_id(log_id)?;
+
+        msg!("tx_log account provided: {}", ctx.accounts.tx_log.key());
+        msg!("log_id value: {}", log_id);
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SplTransfer {
+                    from: ctx.accounts.user_source.to_account_info(),
+                    to: ctx.accounts.destination_token.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            amount_in,
+        )?;
+
+        let clock = Clock::get()?;
+        let tx_log = &mut ctx.accounts.tx_log;
+
+        tx_log.user = ctx.accounts.authority.key();
+        tx_log.mode = TxMode::ManualSwap;
+        tx_log.aggregator = AggregatorName::default();
+        tx_log.amount_in = amount_in;
+        tx_log.amount_out = expected_amount_out;
+        tx_log.timestamp = clock.unix_timestamp;
+        tx_log.bump = ctx.bumps.tx_log;
+
         Ok(())
     }
 
-    /// Swap executed through a whitelisted aggregator.
-    /// 허용된 어그리게이터를 통해 스왑을 수행한다.
     pub fn aggregator_swap(
         ctx: Context<AggregatorSwap>,
-        _aggregator: AggregatorName,
-        _amount_in: u64,
-        _min_amount_out: u64,
+        aggregator: AggregatorName, // Aggregator name to use for swap
+        amount_in: u64,
+        min_amount_out: u64,
+        log_seed: [u8; 8],
     ) -> Result<()> {
-        msg!("aggregator_swap called. TODO: integrate with external aggregator");
+        msg!("aggregator_swap called: logging aggregator execution");
+        // Throw error if amount is not greater than 0 
+        require!(amount_in > 0, TxPlaygroundError::InvalidAmount);
+
+        // Throw error if amount is not greater than 0
+        require!(min_amount_out > 0, TxPlaygroundError::InvalidAmount);
+
+        // Get config from context
+        let config = &ctx.accounts.config;
+
+        // Get active aggregator from config
+        let active = &config.aggregators[..config.aggregator_count as usize];
+        
+        // Throw error if aggregator is not whitelisted inf config 
+        require!(
+            active.contains(&aggregator),
+            TxPlaygroundError::AggregatorNotWhitelisted
+        );
+
+        let log_id = u64::from_le_bytes(log_seed);
+        let user_state = &mut ctx.accounts.user_state;
+        user_state.consume_log_id(log_id)?;
+
+        msg!("tx_log account provided: {}", ctx.accounts.tx_log.key());
+        msg!("log_id value: {}", log_id);
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                SplTransfer {
+                    from: ctx.accounts.user_source.to_account_info(),
+                    to: ctx.accounts.destination_token.to_account_info(),
+                    authority: ctx.accounts.authority.to_account_info(),
+                },
+            ),
+            amount_in,
+        )?;
+
+        let clock = Clock::get()?;
+        let tx_log = &mut ctx.accounts.tx_log;
+
+        tx_log.user = ctx.accounts.authority.key();
+        tx_log.mode = TxMode::AggregatorSwap;
+        tx_log.aggregator = aggregator;
+        tx_log.amount_in = amount_in;
+        tx_log.amount_out = min_amount_out;
+        tx_log.timestamp = clock.unix_timestamp;
+        tx_log.bump = ctx.bumps.tx_log;
+
         Ok(())
     }
 }
 
-#[derive(Accounts)]
+#[derive(Accounts)] // Validate the account is valid and owned by the program
 pub struct InitializeConfig<'info> {
-    /// Authority that creates the config account.
-    /// 컨피그 계정을 생성하는 권한자.
-    #[account(mut)]
+    #[account(mut)] // Mutably access the account 
     pub authority: Signer<'info>,
-
-    /// Config PDA stored with program-wide settings.
-    /// 프로그램 전역 설정을 저장하는 Config PDA.
     #[account(
-        init,
-        payer = authority,
-        space = 8 + Config::INIT_SPACE,
-        seeds = [Config::SEED_PREFIX],
+        init, // Create a new account for the config
+        payer = authority, // Payer is the authority
+        space = 8 + Config::INIT_SPACE, //  Set the space for the config account
+        seeds = [Config::SEED_PREFIX], // Use the seed prefix for the config account
         bump
     )]
     pub config: Account<'info, Config>,
-
-    pub system_program: Program<'info, System>,
+    pub system_program: Program<'info, System>, // System program to create the config account 
 }
 
 #[derive(Accounts)]
-pub struct Transfer<'info> {
-    /// User or admin executing the transfer.
-    /// 전송을 수행하는 사용자 또는 관리자.
+pub struct InitializeUserState<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-
-    /// Config PDA loaded for validation.
-    /// 검증을 위해 불러오는 Config PDA.
     #[account(seeds = [Config::SEED_PREFIX], bump = config.bump)]
     pub config: Account<'info, Config>,
-
-    /// Per-user state storing counters for logging.
-    /// 로그 작성을 위한 사용자별 상태(카운터 등)를 저장.
     #[account(
-        init_if_needed,
+        init,
         payer = authority,
         space = 8 + UserState::INIT_SPACE,
         seeds = [UserState::SEED_PREFIX, authority.key().as_ref()],
         bump
     )]
     pub user_state: Account<'info, UserState>,
-
-    /// Transaction log account to be replaced with a PDA later.
-    /// 향후 PDA로 전환할 트랜잭션 로그 계정.
-    #[account(mut)]
-    pub tx_log: Account<'info, TxLog>,
-
     pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct ManualSwap<'info> {
-    /// User initiating the manual swap.
-    /// 수동 스왑을 실행하는 사용자.
+#[instruction(amount: u64, log_seed: [u8; 8])] // Used to provide extra parmeters needed for account validation.
+pub struct Transfer<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-
-    /// Config PDA ensuring the program configuration.
-    /// 프로그램 설정을 보장하는 Config PDA.
     #[account(seeds = [Config::SEED_PREFIX], bump = config.bump)]
     pub config: Account<'info, Config>,
-
-    /// User state PDA tracking swap counters.
-    /// 스왑 카운터를 추적하는 사용자 상태 PDA.
     #[account(
         mut,
         seeds = [UserState::SEED_PREFIX, authority.key().as_ref()],
         bump = user_state.bump
     )]
     pub user_state: Account<'info, UserState>,
-
-    /// Transaction log account for recording swap events.
-    /// 스왑 이벤트를 기록할 트랜잭션 로그 계정.
     #[account(mut)]
+    pub user_source: Account<'info, TokenAccount>, // The user's SPL token account that holds the tokens to be transferred.
+    #[account(mut)]
+    pub destination_token: Account<'info, TokenAccount>, // The destination SPL token account to receive the tokens.
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + TxLog::INIT_SPACE,
+        seeds = [
+            TX_LOG_SEED_PREFIX,
+            authority.key().as_ref(),
+            &log_seed
+        ],
+        bump
+    )]
     pub tx_log: Account<'info, TxLog>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
-pub struct AggregatorSwap<'info> {
-    /// User calling the aggregator swap.
-    /// 어그리게이터 스왑을 호출하는 사용자.
+#[instruction(amount_in: u64, expected_amount_out: u64, log_seed: [u8; 8])]
+pub struct ManualSwap<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
-
-    /// Config PDA used to verify allowed aggregators.
-    /// 허용된 어그리게이터를 검증하는 Config PDA.
     #[account(seeds = [Config::SEED_PREFIX], bump = config.bump)]
     pub config: Account<'info, Config>,
-
-    /// User state PDA storing aggregator swap counters.
-    /// 어그리게이터 스왑 카운터를 저장하는 사용자 상태 PDA.
     #[account(
         mut,
         seeds = [UserState::SEED_PREFIX, authority.key().as_ref()],
         bump = user_state.bump
     )]
     pub user_state: Account<'info, UserState>,
-
-    /// Transaction log account recording aggregator usage.
-    /// 어그리게이터 사용 내역을 기록하는 트랜잭션 로그 계정.
     #[account(mut)]
+    pub user_source: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub destination_token: Account<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + TxLog::INIT_SPACE,
+        seeds = [
+            TX_LOG_SEED_PREFIX,
+            authority.key().as_ref(),
+            &log_seed
+        ],
+        bump
+    )]
     pub tx_log: Account<'info, TxLog>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(aggregator: AggregatorName, amount_in: u64, min_amount_out: u64, log_seed: [u8; 8])]
+pub struct AggregatorSwap<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [Config::SEED_PREFIX], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(
+        mut,
+        seeds = [UserState::SEED_PREFIX, authority.key().as_ref()],
+        bump = user_state.bump
+    )]
+    pub user_state: Account<'info, UserState>,
+    #[account(mut)]
+    pub user_source: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub destination_token: Account<'info, TokenAccount>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + TxLog::INIT_SPACE,
+        seeds = [
+            TX_LOG_SEED_PREFIX,
+            authority.key().as_ref(),
+            &log_seed
+        ],
+        bump
+    )]
+    pub tx_log: Account<'info, TxLog>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[account]
 #[derive(InitSpace)]
 pub struct Config {
-    /// Owner authorized to update program configuration.
-    /// 프로그램 설정을 갱신할 수 있는 오너.
     pub owner: Pubkey,
-
-    /// Fixed-size array of allowed aggregators.
-    /// 허용된 어그리게이터를 담는 고정 길이 배열.
     pub aggregators: [AggregatorName; MAX_AGGREGATORS],
-
-    /// Number of aggregators currently registered.
-    /// 현재 등록된 어그리게이터 수.
     pub aggregator_count: u8,
-
-    /// PDA bump value for config derivation.
-    /// Config PDA 도출에 사용되는 bump 값.
     pub bump: u8,
 }
 
 impl Config {
-    /// PDA seed prefix for the global config account.
-    /// 전역 Config 계정을 위한 PDA 씨드 접두어.
     pub const SEED_PREFIX: &'static [u8] = b"config";
 }
 
 #[account]
 #[derive(InitSpace)]
 pub struct UserState {
-    /// Sequential identifier used to derive log PDAs.
-    /// 로그 PDA를 만들 때 쓰는 순차적 식별자.
     pub last_tx_id: u64,
-
-    /// PDA bump value for the user state account.
-    /// 사용자 상태 PDA에 대한 bump 값.
     pub bump: u8,
 }
 
 impl UserState {
-    /// PDA seed prefix for individual user state.
-    /// 각 사용자 상태를 위한 PDA 씨드 접두어.
     pub const SEED_PREFIX: &'static [u8] = b"user_state";
+
+    pub fn consume_log_id(&mut self, log_id: u64) -> Result<()> {
+        let expected = self
+            .last_tx_id
+            .checked_add(1)
+            .ok_or_else(|| error!(TxPlaygroundError::CounterOverflow))?;
+        require!(log_id == expected, TxPlaygroundError::InvalidLogId);
+        self.last_tx_id = log_id;
+        Ok(())
+    }
 }
 
 #[account]
 #[derive(InitSpace)]
 pub struct TxLog {
-    /// User who initiated the transaction.
-    /// 트랜잭션을 실행한 사용자.
     pub user: Pubkey,
-
-    /// Type of transaction executed (transfer/swap/etc).
-    /// 실행된 트랜잭션 종류 (전송/스왑 등).
     pub mode: TxMode,
-
-    /// Aggregator involved; default zeroed for pure transfer.
-    /// 관여된 어그리게이터; 단순 전송일 경우 기본값(0) 유지.
     pub aggregator: AggregatorName,
-
-    /// Input amount supplied by the user.
-    /// 사용자가 투입한 금액.
     pub amount_in: u64,
-
-    /// Amount received after the operation.
-    /// 작업 후 수령한 금액.
     pub amount_out: u64,
-
-    /// Unix timestamp recorded for historical analysis.
-    /// 히스토리 분석을 위한 유닉스 타임스탬프.
     pub timestamp: i64,
+    pub bump: u8,
 }
 
-/// Fixed-size wrapper used to store aggregator names.
-/// 어그리게이터 이름을 저장하기 위한 고정 길이 래퍼.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq, Default)]
-pub struct AggregatorName(pub [u8; AGGREGATOR_NAME_LEN]);
+pub struct AggregatorName {
+    pub data: [u8; AGGREGATOR_NAME_LEN],
+}
 
-/// Enumeration describing each transaction mode.
-/// 각 트랜잭션 모드를 설명하는 열거형.
+impl AggregatorName {
+    pub fn from_str(name: &str) -> Result<Self> {
+        let bytes = name.as_bytes();
+        require!(
+            bytes.len() <= AGGREGATOR_NAME_LEN,
+            TxPlaygroundError::AggregatorNameTooLong
+        );
+
+        let mut fixed = [0u8; AGGREGATOR_NAME_LEN];
+        fixed[..bytes.len()].copy_from_slice(bytes);
+        Ok(Self { data: fixed })
+    }
+}
+
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, PartialEq, Eq)]
 pub enum TxMode {
     Transfer,
@@ -272,10 +439,28 @@ impl Default for TxMode {
     }
 }
 
-/// Custom program errors raised by tx_playground.
-/// tx_playground에서 발생시키는 사용자 정의 에러.
 #[error_code]
 pub enum TxPlaygroundError {
     #[msg("Too many aggregators provided")]
     TooManyAggregators,
+    #[msg("At least one aggregator must be provided")]
+    NoAggregatorProvided,
+    #[msg("Aggregator name exceeds maximum length")]
+    AggregatorNameTooLong,
+    #[msg("Amount must be greater than zero")]
+    InvalidAmount,
+    #[msg("Counter overflow while generating log ID")]
+    CounterOverflow,
+    #[msg("Aggregator is not whitelisted in config")]
+    AggregatorNotWhitelisted,
+    #[msg("Provided log id does not match expected sequence")]
+    InvalidLogId,
+}
+
+impl anchor_lang::Space for AggregatorName {
+    const INIT_SPACE: usize = AGGREGATOR_NAME_LEN;
+}
+
+impl anchor_lang::Space for TxMode {
+    const INIT_SPACE: usize = 1;
 }
