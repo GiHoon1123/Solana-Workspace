@@ -8,30 +8,12 @@ use serde_json::json;
 // Handler: queries Jupiter for swap quotes
 // 비즈니스 로직: 클라이언트를 호출해서 데이터 가져오기만 함
 // utoipa::path: Swagger 문서 자동 생성용 어노테이션
-// params의 example: Swagger UI에서 "Try it out" 시 미리 채워지는 값
+// Note: 예시값은 모델(QuoteRequest)에서 관리
+// Note: example values are managed in model (QuoteRequest)
 #[utoipa::path(
     get,
     path = "/api/jupiter/quote",
-    params(
-        (
-            "input_mint" = String, 
-            Query, 
-            description = "Input token mint address (e.g., USDC)",
-            example = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
-        ),
-        (
-            "output_mint" = String, 
-            Query, 
-            description = "Output token mint address (e.g., SOL)",
-            example = "So11111111111111111111111111111111111111112"
-        ),
-        (
-            "amount" = u64, 
-            Query, 
-            description = "Amount to swap (in lamports/minimal units)",
-            example = 1000000
-        )
-    ),
+    params(QuoteRequest),
     responses(
         (status = 200, description = "Quote retrieved successfully", body = QuoteResponse),
         (status = 400, description = "Bad request"),

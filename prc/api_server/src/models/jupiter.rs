@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use utoipa::ToSchema;
 
 // Jupiter Quote API 응답 모델
@@ -65,13 +64,11 @@ pub struct SwapInfo {
 
 // Jupiter Quote API 요청 파라미터
 // utoipa::ToSchema: Swagger 문서 자동 생성용
-// example: Swagger UI에서 예시값으로 표시
-#[derive(Debug, Serialize, Deserialize, ToSchema)]
-#[schema(as = QuoteRequest, example = json!({
-    "input_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-    "output_mint": "So11111111111111111111111111111111111111112",
-    "amount": 1000000
-}))]
+// utoipa::IntoParams: 쿼리 파라미터로 사용하기 위한 trait
+// 예시값: 모델에서 중앙 관리 (비즈니스 로직과 분리)
+// Example values: centrally managed in model (separated from business logic)
+#[derive(Debug, Serialize, Deserialize, ToSchema, utoipa::IntoParams)]
+#[schema(as = QuoteRequest)]
 pub struct QuoteRequest {
     /// Input token mint address (e.g., USDC)
     /// 입력 토큰 주소 (예: USDC)
