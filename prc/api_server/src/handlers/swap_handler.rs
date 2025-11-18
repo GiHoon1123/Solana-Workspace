@@ -3,7 +3,7 @@ use crate::models::{QuoteRequest, QuoteResponse};
 use axum::{extract::Query, http::StatusCode, Json};
 use serde_json::json;
 
-// Jupiter 가격 조회 핸들러
+// 스왑 가격 조회 핸들러
 // 역할: NestJS의 @Get() 핸들러 같은 것
 // Handler: queries Jupiter for swap quotes
 // 비즈니스 로직: 클라이언트를 호출해서 데이터 가져오기만 함
@@ -12,7 +12,7 @@ use serde_json::json;
 // Note: example values are managed in model (QuoteRequest)
 #[utoipa::path(
     get,
-    path = "/api/jupiter/quote",
+    path = "/api/swap/quote",
     params(QuoteRequest),
     responses(
         (status = 200, description = "Quote retrieved successfully", body = QuoteResponse),
@@ -20,7 +20,7 @@ use serde_json::json;
         (status = 500, description = "Internal server error"),
         (status = 502, description = "Jupiter API error")
     ),
-    tag = "Jupiter"
+    tag = "Swap"
 )]
 pub async fn get_quote(
     Query(params): Query<QuoteRequest>,
@@ -50,3 +50,4 @@ pub async fn get_quote(
 
     Ok(Json(quote))
 }
+

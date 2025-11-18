@@ -23,3 +23,9 @@ thiserror = "1.0"
 # OpenAPI/Swagger documentation
 utoipa = { version = "4.0", features = ["axum_extras", "chrono"] }
 utoipa-swagger-ui = { version = "6.0", features = ["axum"] }
+
+# Solana client (RPC 통신용)
+solana-client = "1.18"
+solana-sdk = "1.18"
+anchor-client = "0.30"
+anchor-lang = "0.30"
