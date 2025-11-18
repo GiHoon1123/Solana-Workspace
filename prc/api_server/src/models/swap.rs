@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-// Jupiter Quote API 응답 모델
+// 스왑 가격 조회 API 응답 모델
 // 역할: NestJS의 interface 같은 것
 // Note: Jupiter API는 camelCase로 응답하므로 #[serde(rename = "...")]로 매핑
 // utoipa::ToSchema: Swagger 문서 자동 생성용
@@ -62,7 +62,7 @@ pub struct SwapInfo {
     pub fee_mint: String,
 }
 
-// Jupiter Quote API 요청 파라미터
+// 스왑 가격 조회 API 요청 파라미터
 // utoipa::ToSchema: Swagger 문서 자동 생성용
 // utoipa::IntoParams: 쿼리 파라미터로 사용하기 위한 trait
 // 예시값: 모델에서 중앙 관리 (비즈니스 로직과 분리)
@@ -89,3 +89,4 @@ pub struct QuoteRequest {
     /// 슬리피지 (기본점 단위, 선택사항)
     pub slippage_bps: Option<i32>,
 }
+
