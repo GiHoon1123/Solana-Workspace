@@ -11,8 +11,8 @@ mod clients;  // 외부 API 클라이언트 모듈 추가
 mod database;
 
 use routes::create_router;
-use crate::models::{QuoteRequest, QuoteResponse, RoutePlan, SwapInfo};
-use crate::handlers::swap_handler;
+use crate::models::{QuoteRequest, QuoteResponse, RoutePlan, SwapInfo, TokenSearchRequest, TokenSearchResponse, Token};
+use crate::handlers::{swap_handler, token_handler};
 use database::Database;
 
 // OpenAPI 스키마 정의: Swagger 문서 자동 생성
@@ -20,16 +20,21 @@ use database::Database;
 #[derive(OpenApi)]
 #[openapi(
     paths(
-        swap_handler::get_quote
+        swap_handler::get_quote,
+        token_handler::search_tokens
     ),
     components(schemas(
         QuoteRequest,
         QuoteResponse,
         RoutePlan,
-        SwapInfo
+        SwapInfo,
+        TokenSearchRequest,
+        TokenSearchResponse,
+        Token
     )),
     tags(
-        (name = "Swap", description = "Swap API endpoints (Jupiter integration)")
+        (name = "Swap", description = "Swap API endpoints (Jupiter integration)"),
+        (name = "Tokens", description = "Token search API endpoints")
     ),
     info(
         title = "Solana API Server",

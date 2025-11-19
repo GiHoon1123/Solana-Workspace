@@ -1,4 +1,4 @@
-use crate::models::QuoteResponse;
+use crate::models::{QuoteResponse, TokenSearchResponse} ;
 use anyhow::{Context, Result};
 
 // Jupiter API 클라이언트
@@ -73,6 +73,47 @@ impl JupiterClient {
 
         Ok(quote)
     }
+
+
+    pub async fn search_tokens(&self, query: &str) -> Result<TokenSearchResponse> {
+        // URL 생성
+        let url = format!("{}/search?query={}", self.base_url, query);
+
+        println!("Requesting Jupiter Search API: {}", url);
+
+        // HTTP GET 요청
+        let response = self
+            .http_client
+            .get(&url)
+            .header("User-Agent", "api-server/1.0")
+            .send()
+            .await
+            .context("Failed to send request to Jupiter Search API")?;
+
+        // HTTP 상태 코드 확인
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!(
+                "Jupiter Search API returned error: {} - {}",
+                status,
+                body
+            );
+        }
+
+        // JSON 파싱: 실제 API 응답은 배열이므로 Vec<Token>으로 파싱
+        use crate::models::Token;
+        let tokens: Vec<Token> = response
+            .json()
+            .await
+            .context("Failed to parse Jupiter Search API response")?;
+
+        // TokenSearchResponse로 변환
+        Ok(TokenSearchResponse { tokens })
+    }
+
+
+
 }
 
 // 기본 구현: new() 메서드 제공
