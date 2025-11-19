@@ -70,23 +70,48 @@ pub struct SwapInfo {
 #[derive(Debug, Serialize, Deserialize, ToSchema, utoipa::IntoParams)]
 #[schema(as = QuoteRequest)]
 pub struct QuoteRequest {
-    /// Input token mint address (e.g., USDC)
-    /// 입력 토큰 주소 (예: USDC)
+    /// Input token mint address
+    /// 입력 토큰 주소
+    ///
+    /// Examples:
+    /// - USDC: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+    /// - USDT: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+    /// - BONK: DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263
+    #[param(example = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")]
     #[schema(example = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v")]
     pub input_mint: String,
     
-    /// Output token mint address (e.g., SOL)
-    /// 출력 토큰 주소 (예: SOL)
+    /// Output token mint address
+    /// 출력 토큰 주소
+    ///
+    /// Examples:
+    /// - SOL: So11111111111111111111111111111111111111112
+    /// - USDC: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v
+    /// - USDT: Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB
+    #[param(example = "So11111111111111111111111111111111111111112")]
     #[schema(example = "So11111111111111111111111111111111111111112")]
     pub output_mint: String,
     
     /// Amount to swap (in lamports/minimal units)
     /// 스왑할 수량 (lamports/최소 단위)
+    ///
+    /// Examples:
+    /// - 1 USDC = 1000000 (6 decimals)
+    /// - 0.1 SOL = 100000000 (9 decimals)
+    /// - 1 USDT = 1000000 (6 decimals)
+    #[param(example = 1000000)]
     #[schema(example = 1000000)]
     pub amount: u64,
     
-    /// Slippage in basis points (optional)
-    /// 슬리피지 (기본점 단위, 선택사항)
+    /// Slippage in basis points (optional, default: 50 = 0.5%)
+    /// 슬리피지 (기본점 단위, 선택사항, 기본값: 50 = 0.5%)
+    ///
+    /// Examples:
+    /// - 50 = 0.5% slippage
+    /// - 100 = 1% slippage
+    /// - 200 = 2% slippage
+    #[param(example = 50)]
+    #[schema(example = 50)]
     pub slippage_bps: Option<i32>,
 }
 

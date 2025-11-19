@@ -34,13 +34,20 @@ impl JupiterClient {
         input_mint: &str,
         output_mint: &str,
         amount: u64,
+        slippage_bps: Option<i32>,
     ) -> Result<QuoteResponse> {
         // URL 생성
         // Build request URL
-        let url = format!(
+        let mut url = format!(
             "{}/quote?inputMint={}&outputMint={}&amount={}",
             self.base_url, input_mint, output_mint, amount
         );
+
+        // slippageBps 파라미터 추가 (있을 경우)
+        // Add slippageBps parameter if provided
+        if let Some(slippage) = slippage_bps {
+            url.push_str(&format!("&slippageBps={}", slippage));
+        }
 
         println!("Requesting Jupiter API: {}", url);  // 디버깅용 로그
 

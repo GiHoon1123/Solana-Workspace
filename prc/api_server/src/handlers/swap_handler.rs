@@ -40,7 +40,12 @@ pub async fn get_quote(
     // 클라이언트를 통해서 외부 API 호출
     // Call external API through client
     let quote = jupiter_client
-        .get_quote(&params.input_mint, &params.output_mint, params.amount)
+        .get_quote(
+            &params.input_mint, 
+            &params.output_mint, 
+            params.amount,
+            params.slippage_bps  // slippage_bps 전달
+        )
         .await
         .map_err(|e| {
             (
@@ -86,7 +91,12 @@ pub async fn create_swap_transaction(
     // 2. Quote 조회
     // Get quote
     let quote = jupiter_client
-        .get_quote(&request.input_mint, &request.output_mint, request.amount)
+        .get_quote(
+            &request.input_mint, 
+            &request.output_mint, 
+            request.amount,
+            request.slippage_bps  // slippage_bps 전달
+        )
         .await
         .map_err(|e| {
             (
