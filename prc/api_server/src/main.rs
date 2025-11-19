@@ -8,10 +8,12 @@ mod routes;
 mod handlers;
 mod models;
 mod clients;  // 외부 API 클라이언트 모듈 추가
+mod database;
 
 use routes::create_router;
 use crate::models::{QuoteRequest, QuoteResponse, RoutePlan, SwapInfo};
 use crate::handlers::swap_handler;
+use database::Database;
 
 // OpenAPI 스키마 정의: Swagger 문서 자동 생성
 // OpenAPI schema definition: auto-generate Swagger documentation
@@ -51,6 +53,18 @@ async fn main() {
             SwaggerUi::new("/api")
                 .url("/api-docs/openapi.json", ApiDoc::openapi())
         );
+    
+    let db_url = "postgresql://root:1234@localhost/solana_api";
+    let db = Database::new(db_url)
+        .await
+        .expect("Failed to connect to database");
+
+    db.initialize()
+        .await
+        .expect("Failed to initialize database");
+
+    
+    
 
     // 서버 시작: 3002 포트에서 리스닝
     let listener = TcpListener::bind("0.0.0.0:3002")
