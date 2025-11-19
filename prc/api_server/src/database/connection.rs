@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 // 데이터베이스 연결 풀
 // 역할: NestJS의 Database connection 같은 것
 // Database connection pool for PostgreSQL
+#[derive(Clone)]
 pub struct Database {
     pool: PgPool,
 }
@@ -36,7 +37,7 @@ impl Database {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS transactions (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                id BIGSERIAL PRIMARY KEY,
                 input_mint VARCHAR(255) NOT NULL,
                 output_mint VARCHAR(255) NOT NULL,
                 amount BIGINT NOT NULL,
@@ -52,7 +53,7 @@ impl Database {
         .execute(self.pool())
         .await
         .context("Failed to create transactions table")?;
-
+    
         println!("Database initialized successfully");
         Ok(())
     }

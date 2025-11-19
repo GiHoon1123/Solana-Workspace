@@ -2,6 +2,8 @@
 // 역할: NestJS의 DTO나 interface 같은 것
 pub mod swap;
 pub mod tokens;
+pub mod transaction;
 
 pub use swap::*;
 pub use tokens::*;
+pub use transaction::*;
