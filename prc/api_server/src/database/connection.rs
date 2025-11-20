@@ -29,32 +29,18 @@ impl Database {
         &self.pool
     }
 
-    // 테이블 생성 (초기화)
-    // Create tables (initialization)
+    // 테이블 생성 (초기화) - 마이그레이션 실행
+    // Create tables (initialization) - Run migrations
+    // migrations/ 폴더의 모든 .sql 파일을 순서대로 실행
     pub async fn initialize(&self) -> Result<()> {
-        // transactions 테이블 생성
-        // Create transactions table
-        sqlx::query(
-            r#"
-            CREATE TABLE IF NOT EXISTS transactions (
-                id BIGSERIAL PRIMARY KEY,
-                input_mint VARCHAR(255) NOT NULL,
-                output_mint VARCHAR(255) NOT NULL,
-                amount BIGINT NOT NULL,
-                expected_out_amount BIGINT,
-                user_public_key VARCHAR(255) NOT NULL,
-                transaction_bytes TEXT NOT NULL,
-                quote_response JSONB,
-                status VARCHAR(50) NOT NULL DEFAULT 'created',
-                created_at TIMESTAMP NOT NULL DEFAULT NOW()
-            )
-            "#,
-        )
-        .execute(self.pool())
-        .await
-        .context("Failed to create transactions table")?;
+        // 마이그레이션 자동 실행
+        // Run migrations from migrations/ folder
+        sqlx::migrate!("./migrations")
+            .run(self.pool())
+            .await
+            .context("Failed to run database migrations")?;
     
-        println!("Database initialized successfully");
+        println!("Database migrations completed successfully");
         Ok(())
     }
 }
