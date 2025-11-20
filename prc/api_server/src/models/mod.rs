@@ -3,7 +3,11 @@
 pub mod swap;
 pub mod tokens;
 pub mod transaction;
+pub mod user;
+pub mod solana_wallet;
 
 pub use swap::*;
 pub use tokens::*;
 pub use transaction::*;
+pub use user::*;
+pub use solana_wallet::*;
