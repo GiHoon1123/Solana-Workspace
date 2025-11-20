@@ -18,7 +18,7 @@ pub struct QuoteResponse {
     #[serde(rename = "swapMode")]
     pub swap_mode: String,
     #[serde(rename = "slippageBps")]
-    pub slippage_bps: i32,
+    pub slippage_bps: u32,
     #[serde(rename = "priceImpactPct")]
     pub price_impact_pct: Option<String>,
     #[serde(rename = "routePlan")]
@@ -112,6 +112,6 @@ pub struct QuoteRequest {
     /// - 200 = 2% slippage
     #[param(example = 50)]
     #[schema(example = 50)]
-    pub slippage_bps: Option<i32>,
+    pub slippage_bps: Option<u32>,
 }
 

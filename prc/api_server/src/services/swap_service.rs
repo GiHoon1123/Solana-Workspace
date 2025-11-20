@@ -16,7 +16,7 @@ impl SwapService {
         input_mint: &str,
         output_mint: &str,
         amount: u64,
-        slippage_bps: Option<i32>,
+        slippage_bps: Option<u32>,
     ) -> Result<QuoteResponse> {
         let jupiter_client = JupiterClient::new()
             .context("Failed to create Jupiter client")?;

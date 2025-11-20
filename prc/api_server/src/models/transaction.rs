@@ -30,7 +30,7 @@ pub struct SwapTransactionRequest {
     /// Slippage in basis points (optional, default: 50 = 0.5%)
     /// 슬리피지 (기본점 단위, 선택사항, 기본값: 50 = 0.5%)
     #[schema(example = 50)]
-    pub slippage_bps: Option<i32>,
+    pub slippage_bps: Option<u32>,
 
     /// Wrap and unwrap SOL (optional, default: true)
     /// SOL 래핑/언래핑 여부 (선택사항, 기본값: true)
