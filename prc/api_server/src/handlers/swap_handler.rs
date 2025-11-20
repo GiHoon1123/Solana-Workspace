@@ -1,8 +1,7 @@
-use crate::clients::JupiterClient;
 use crate::models::{QuoteRequest, QuoteResponse, SwapTransactionRequest, SwapTransactionResponse};
 use crate::database::Database;
 use crate::database::TransactionRepository;
-use crate::models::TransactionStatus;
+use crate::services::SwapService;
 use axum::{extract::Query, extract::State, http::StatusCode, Json};
 use serde_json::json;
 
@@ -28,33 +27,23 @@ use serde_json::json;
 pub async fn get_quote(
     Query(params): Query<QuoteRequest>,
 ) -> Result<Json<QuoteResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Jupiter 클라이언트 생성 (또는 싱글톤으로 관리 가능)
-    // Create Jupiter client (can be managed as singleton)
-    let jupiter_client = JupiterClient::new().map_err(|e| {
+    // Service 호출 (비즈니스 로직)
+    // Call service (business logic)
+    let quote = SwapService::get_quote(
+        &params.input_mint,
+        &params.output_mint,
+        params.amount,
+        params.slippage_bps,
+    )
+    .await
+    .map_err(|e| {
         (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Jupiter client: {}", e)})),
+            StatusCode::BAD_GATEWAY,
+            Json(json!({
+                "error": format!("Failed to get quote: {}", e)
+            })),
         )
     })?;
-
-    // 클라이언트를 통해서 외부 API 호출
-    // Call external API through client
-    let quote = jupiter_client
-        .get_quote(
-            &params.input_mint, 
-            &params.output_mint, 
-            params.amount,
-            params.slippage_bps  // slippage_bps 전달
-        )
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": format!("Failed to fetch quote from Jupiter: {}", e)
-                })),
-            )
-        })?;
 
     Ok(Json(quote))
 }
@@ -79,86 +68,22 @@ pub async fn create_swap_transaction(
     State(db): State<Database>,
     Json(request): Json<SwapTransactionRequest>,
 ) -> Result<Json<SwapTransactionResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // 1. Jupiter 클라이언트 생성
-    // Create Jupiter client
-    let jupiter_client = JupiterClient::new().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Jupiter client: {}", e)})),
-        )
-    })?;
-
-    // 2. Quote 조회
-    // Get quote
-    let quote = jupiter_client
-        .get_quote(
-            &request.input_mint, 
-            &request.output_mint, 
-            request.amount,
-            request.slippage_bps  // slippage_bps 전달
-        )
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": format!("Failed to fetch quote from Jupiter: {}", e)
-                })),
-            )
-        })?;
-
-    // 3. Swap 트랜잭션 생성
-    // Create swap transaction
-    let mut swap_response = jupiter_client
-        .create_swap_transaction(&request, &quote)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::BAD_GATEWAY,
-                Json(json!({
-                    "error": format!("Failed to create swap transaction from Jupiter: {}", e)
-                })),
-            )
-        })?;
-
-    // 4. 예상 출력 금액 파싱 (outAmount를 u64로 변환)
-    // Parse expected output amount (convert outAmount to u64)
-    let expected_out_amount = quote.out_amount.parse::<u64>().ok();
-
-    // 5. Quote 응답을 JSON으로 변환
-    // Convert quote response to JSON
-    let quote_json = serde_json::to_value(&quote).ok();
-
-    // 6. 레포지토리 생성
+    // Repository 생성
     // Create repository
     let repo = TransactionRepository::new(db.pool().clone());
 
-    // 7. DB에 트랜잭션 저장
-    // Save transaction to database
-    let saved_transaction = repo
-        .save_transaction(
-            &request.input_mint,
-            &request.output_mint,
-            request.amount,  // u64
-            expected_out_amount,  // Option<u64>
-            &request.user_public_key,
-            &swap_response.swap_transaction,
-            quote_json,
-            TransactionStatus::Created,
-        )
+    // Service 호출 (비즈니스 로직)
+    // Call service (business logic)
+    let swap_response = SwapService::create_swap_transaction(repo, request)
         .await
         .map_err(|e| {
             (
-                StatusCode::INTERNAL_SERVER_ERROR,
+                StatusCode::BAD_GATEWAY,
                 Json(json!({
-                    "error": format!("Failed to save transaction to database: {}", e)
+                    "error": format!("Failed to create swap transaction: {}", e)
                 })),
             )
         })?;
-
-    // 8. 응답에 생성된 ID 설정
-    // Set generated ID in response
-    swap_response.id = Some(saved_transaction.id);
 
     Ok(Json(swap_response))
 }

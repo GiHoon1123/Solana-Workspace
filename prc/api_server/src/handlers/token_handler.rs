@@ -1,5 +1,5 @@
-use crate::clients::JupiterClient;
 use crate::models::{TokenSearchRequest, TokenSearchResponse};
+use crate::services::TokenService;
 use axum::{extract::Query, http::StatusCode, Json};
 use serde_json::json;
 
@@ -20,28 +20,18 @@ use serde_json::json;
 pub async fn search_tokens(
     Query(params): Query<TokenSearchRequest>,
 ) -> Result<Json<TokenSearchResponse>, (StatusCode, Json<serde_json::Value>)> {
-    
-    // Jupiter 클라이언트 생성
-    let jupiter_client = JupiterClient::new().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(json!({"error": format!("Failed to create Jupiter client: {}", e)})),
-        )
-    })?;
-
-
-    // 토큰 검색 API 호출
-    let search_result = jupiter_client
-    .search_tokens(&params.query)
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({
-                "error": format!("Failed to search tokens from Jupiter: {}", e)
-            })),
-        )
-    })?;
+    // Service 호출 (비즈니스 로직)
+    // Call service (business logic)
+    let search_result = TokenService::search_tokens(&params.query)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": format!("Failed to search tokens: {}", e)
+                })),
+            )
+        })?;
 
     Ok(Json(search_result))
 }
