@@ -1,7 +1,5 @@
 use crate::models::{QuoteRequest, QuoteResponse, SwapTransactionRequest, SwapTransactionResponse};
-use crate::database::Database;
-use crate::database::TransactionRepository;
-use crate::services::SwapService;
+use crate::services::AppState;
 use axum::{extract::Query, extract::State, http::StatusCode, Json};
 use serde_json::json;
 
@@ -25,25 +23,28 @@ use serde_json::json;
     tag = "Swap"
 )]
 pub async fn get_quote(
+    State(app_state): State<AppState>,
     Query(params): Query<QuoteRequest>,
 ) -> Result<Json<QuoteResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Service 호출 (비즈니스 로직)
     // Call service (business logic)
-    let quote = SwapService::get_quote(
-        &params.input_mint,
-        &params.output_mint,
-        params.amount,
-        params.slippage_bps,
-    )
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::BAD_GATEWAY,
-            Json(json!({
-                "error": format!("Failed to get quote: {}", e)
-            })),
+    let quote = app_state
+        .swap_service
+        .get_quote(
+            &params.input_mint,
+            &params.output_mint,
+            params.amount,
+            params.slippage_bps,
         )
-    })?;
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::BAD_GATEWAY,
+                Json(json!({
+                    "error": format!("Failed to get quote: {}", e)
+                })),
+            )
+        })?;
 
     Ok(Json(quote))
 }
@@ -65,16 +66,14 @@ pub async fn get_quote(
     tag = "Swap"
 )]
 pub async fn create_swap_transaction(
-    State(db): State<Database>,
+    State(app_state): State<AppState>,
     Json(request): Json<SwapTransactionRequest>,
 ) -> Result<Json<SwapTransactionResponse>, (StatusCode, Json<serde_json::Value>)> {
-    // Repository 생성
-    // Create repository
-    let repo = TransactionRepository::new(db.pool().clone());
-
     // Service 호출 (비즈니스 로직)
     // Call service (business logic)
-    let swap_response = SwapService::create_swap_transaction(repo, request)
+    let swap_response = app_state
+        .swap_service
+        .create_swap_transaction(request)
         .await
         .map_err(|e| {
             (

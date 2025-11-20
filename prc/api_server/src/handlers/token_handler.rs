@@ -1,6 +1,6 @@
 use crate::models::{TokenSearchRequest, TokenSearchResponse};
-use crate::services::TokenService;
-use axum::{extract::Query, http::StatusCode, Json};
+use crate::services::AppState;
+use axum::{extract::Query, extract::State, http::StatusCode, Json};
 use serde_json::json;
 
 // 토큰 검색 핸들러
@@ -18,11 +18,14 @@ use serde_json::json;
     tag = "Tokens"
 )]
 pub async fn search_tokens(
+    State(app_state): State<AppState>,
     Query(params): Query<TokenSearchRequest>,
 ) -> Result<Json<TokenSearchResponse>, (StatusCode, Json<serde_json::Value>)> {
     // Service 호출 (비즈니스 로직)
     // Call service (business logic)
-    let search_result = TokenService::search_tokens(&params.query)
+    let search_result = app_state
+        .token_service
+        .search_tokens(&params.query)
         .await
         .map_err(|e| {
             (

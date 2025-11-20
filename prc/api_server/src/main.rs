@@ -18,7 +18,8 @@ use crate::models::{
     SwapTransactionRequest, SwapTransactionResponse, Transaction
 };
 use crate::handlers::{swap_handler, token_handler};
-use database::Database;
+use crate::database::Database;
+use crate::services::AppState;
 
 // OpenAPI 스키마 정의: Swagger 문서 자동 생성
 #[derive(OpenApi)]
@@ -64,7 +65,12 @@ async fn main() {
         .await
         .expect("Failed to initialize database");
 
-    // Router 생성 (Database State 추가)
+    // AppState 생성 (모든 Service 초기화)
+    // Create AppState (initialize all services)
+    let app_state = AppState::new(db);
+
+    // Router 생성 (AppState를 State로 사용)
+    // Create router (uses AppState as State)
     // Axum 0.7에서는 with_state를 최상위에 하면 nested Router들에도 자동으로 전파됨
     let app = Router::new()
         .merge(create_router())
@@ -72,7 +78,7 @@ async fn main() {
             SwaggerUi::new("/api")
                 .url("/api-docs/openapi.json", ApiDoc::openapi())
         )
-        .with_state(db);  // State 추가 - nested Router들에 자동 전파
+        .with_state(app_state);  // AppState를 State로 - nested Router들에 자동 전파
 
     // 서버 시작: 3002 포트에서 리스닝
     let listener = TcpListener::bind("0.0.0.0:3002")
