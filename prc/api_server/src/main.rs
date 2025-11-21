@@ -16,9 +16,12 @@ use crate::models::{
     QuoteRequest, QuoteResponse, RoutePlan, SwapInfo, 
     TokenSearchRequest, TokenSearchResponse, Token,
     SwapTransactionRequest, SwapTransactionResponse, Transaction,
-    SignupRequest, SignupResponse, SigninRequest, SigninResponse, UserResponse
+    SignupRequest, SignupResponse, SigninRequest, SigninResponse, UserResponse,
+    CreateWalletRequest, CreateWalletResponse, WalletResponse, WalletsResponse,
+    BalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
+    SolanaWallet,
 };
-use crate::handlers::{swap_handler, token_handler, auth_handler};
+use crate::handlers::{swap_handler, token_handler, auth_handler, wallet_handler};
 use crate::database::Database;
 use crate::services::AppState;
 
@@ -30,7 +33,13 @@ use crate::services::AppState;
         swap_handler::create_swap_transaction,
         token_handler::search_tokens,
         auth_handler::signup,
-        auth_handler::signin
+        auth_handler::signin,
+        wallet_handler::create_wallet,
+        wallet_handler::get_wallet,
+        wallet_handler::get_user_wallets,
+        wallet_handler::get_balance,
+        wallet_handler::transfer_sol,
+        wallet_handler::get_transaction_status
     ),
     components(schemas(
         QuoteRequest,
@@ -47,12 +56,22 @@ use crate::services::AppState;
         SignupResponse,
         SigninRequest,
         SigninResponse,
-        UserResponse
+        UserResponse,
+        CreateWalletRequest,
+        CreateWalletResponse,
+        WalletResponse,
+        WalletsResponse,
+        BalanceResponse,
+        TransferSolRequest,
+        TransferSolResponse,
+        TransactionStatusResponse,
+        SolanaWallet
     )),
     tags(
         (name = "Swap", description = "Swap API endpoints (Jupiter integration)"),
         (name = "Tokens", description = "Token search API endpoints"),
-        (name = "Auth", description = "Authentication API endpoints")
+        (name = "Auth", description = "Authentication API endpoints"),
+        (name = "Wallets", description = "Wallet API endpoints (Solana wallet management)")
     ),
     info(
         title = "Solana API Server",
@@ -76,7 +95,8 @@ async fn main() {
 
     // AppState 생성 (모든 Service 초기화)
     // Create AppState (initialize all services)
-    let app_state = AppState::new(db);
+    let app_state = AppState::new(db)
+        .expect("Failed to initialize AppState");
 
     // Router 생성 (AppState를 State로 사용)
     // Create router (uses AppState as State)

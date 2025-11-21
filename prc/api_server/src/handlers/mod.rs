@@ -3,3 +3,4 @@
 pub mod swap_handler;
 pub mod token_handler;
 pub mod auth_handler;
+pub mod wallet_handler;

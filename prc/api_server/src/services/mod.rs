@@ -5,10 +5,12 @@
 pub mod swap_service;
 pub mod token_service;
 pub mod auth_service;
+pub mod wallet_service;
 pub mod app_state;
 
 pub use swap_service::*;
 pub use token_service::*;
 pub use auth_service::*;
+pub use wallet_service::*;
 pub use app_state::*;
 

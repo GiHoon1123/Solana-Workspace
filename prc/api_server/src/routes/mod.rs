@@ -3,6 +3,7 @@
 pub mod swap;
 pub mod tokens;
 pub mod auth;
+pub mod wallet;
 
 use axum::Router;
 use crate::services::AppState;
@@ -14,6 +15,7 @@ pub fn create_router() -> Router<AppState> {
         .nest("/api/swap", swap::create_swap_router())
         .nest("/api/tokens", tokens::create_tokens_router())
         .nest("/api/auth", auth::create_auth_router())
+        .nest("/api/wallets", wallet::create_wallet_router())
 }
 
   

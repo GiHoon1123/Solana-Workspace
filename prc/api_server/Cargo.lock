@@ -338,6 +338,7 @@ dependencies = [
  "anyhow",
  "argon2",
  "axum",
+ "base64 0.21.7",
  "chrono",
  "reqwest",
  "serde",
