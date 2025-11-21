@@ -11,6 +11,11 @@ pub enum WalletError {
     #[error("Wallet not found: id={id}")]
     NotFound { id: u64 },
 
+    /// 사용자당 지갑이 이미 존재함
+    /// Wallet already exists for user
+    #[error("Wallet already exists for user: user_id={user_id}")]
+    WalletAlreadyExists { user_id: u64 },
+
     /// 지갑을 찾을 수 없음 (Public Key로)
     /// Wallet not found by public key
     #[error("Wallet not found: public_key={public_key}")]
@@ -66,6 +71,9 @@ impl From<WalletError> for (StatusCode, Json<serde_json::Value>) {
             }
             WalletError::NotFoundByPublicKey { .. } => {
                 (StatusCode::NOT_FOUND, err.to_string())
+            }
+            WalletError::WalletAlreadyExists { .. } => {
+                (StatusCode::BAD_REQUEST, err.to_string())
             }
             WalletError::InsufficientBalance { .. } => {
                 (StatusCode::BAD_REQUEST, err.to_string())

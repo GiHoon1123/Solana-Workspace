@@ -32,22 +32,38 @@ impl WalletService {
 
     /// 새 지갑 생성
     /// Create new wallet for user
+    /// Note: 사용자당 1개 지갑만 허용 (UNIQUE 제약 + 에러 처리)
     pub async fn create_wallet(&self, user_id: u64) -> Result<SolanaWallet, WalletError> {
-        // 1. Keypair 생성 (새 지갑)
+        // 1. 기존 지갑 확인 (명확한 에러 메시지를 위해)
+        // Check existing wallet (for clear error message)
+        let existing_wallets = self.get_user_wallets(user_id).await?;
+        if !existing_wallets.is_empty() {
+            return Err(WalletError::WalletAlreadyExists { user_id });
+        }
+
+        // 2. Keypair 생성 (새 지갑)
         let keypair = SolanaClient::generate_wallet();
         let public_key = keypair.pubkey().to_string();
 
-        // 2. Private Key 암호화 (일단 Base64 인코딩, 나중에 실제 암호화 추가)
+        // 3. Private Key 암호화 (일단 Base64 인코딩, 나중에 실제 암호화 추가)
         // Encrypt private key (currently Base64 encoding, will add real encryption later)
         let private_key_bytes = keypair.to_bytes();
         let encrypted_private_key = general_purpose::STANDARD.encode(&private_key_bytes);
 
-        // 3. DB에 저장
+        // 4. DB에 저장 (UNIQUE 제약이 최종 보호 역할)
         let wallet_repo = SolanaWalletRepository::new(self.db.pool().clone());
         let wallet = wallet_repo
             .create_solana_wallet(user_id, &public_key, &encrypted_private_key)
             .await
-            .map_err(|e| WalletError::DatabaseError(format!("Failed to save wallet to database: {}", e)))?;
+            .map_err(|e| {
+                // UNIQUE 제약 위반 에러 처리
+                let error_msg = e.to_string();
+                if error_msg.contains("unique constraint") || error_msg.contains("duplicate key") {
+                    WalletError::WalletAlreadyExists { user_id }
+                } else {
+                    WalletError::DatabaseError(format!("Failed to save wallet to database: {}", e))
+                }
+            })?;
 
         Ok(wallet)
     }
