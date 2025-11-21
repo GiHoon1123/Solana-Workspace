@@ -2,6 +2,7 @@
 // 역할: NestJS의 controller 같은 것
 pub mod swap;
 pub mod tokens;
+pub mod auth;
 
 use axum::Router;
 use crate::services::AppState;
@@ -12,6 +13,7 @@ pub fn create_router() -> Router<AppState> {
     Router::new()
         .nest("/api/swap", swap::create_swap_router())
         .nest("/api/tokens", tokens::create_tokens_router())
+        .nest("/api/auth", auth::create_auth_router())
 }
 
   

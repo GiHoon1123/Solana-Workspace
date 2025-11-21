@@ -15,9 +15,10 @@ use routes::create_router;
 use crate::models::{
     QuoteRequest, QuoteResponse, RoutePlan, SwapInfo, 
     TokenSearchRequest, TokenSearchResponse, Token,
-    SwapTransactionRequest, SwapTransactionResponse, Transaction
+    SwapTransactionRequest, SwapTransactionResponse, Transaction,
+    SignupRequest, SignupResponse, SigninRequest, SigninResponse, UserResponse
 };
-use crate::handlers::{swap_handler, token_handler};
+use crate::handlers::{swap_handler, token_handler, auth_handler};
 use crate::database::Database;
 use crate::services::AppState;
 
@@ -27,7 +28,9 @@ use crate::services::AppState;
     paths(
         swap_handler::get_quote,
         swap_handler::create_swap_transaction,
-        token_handler::search_tokens
+        token_handler::search_tokens,
+        auth_handler::signup,
+        auth_handler::signin
     ),
     components(schemas(
         QuoteRequest,
@@ -39,11 +42,17 @@ use crate::services::AppState;
         Token,
         SwapTransactionRequest,
         SwapTransactionResponse,
-        Transaction
+        Transaction,
+        SignupRequest,
+        SignupResponse,
+        SigninRequest,
+        SigninResponse,
+        UserResponse
     )),
     tags(
         (name = "Swap", description = "Swap API endpoints (Jupiter integration)"),
-        (name = "Tokens", description = "Token search API endpoints")
+        (name = "Tokens", description = "Token search API endpoints"),
+        (name = "Auth", description = "Authentication API endpoints")
     ),
     info(
         title = "Solana API Server",
