@@ -45,6 +45,16 @@ pub enum AuthError {
     /// Internal server error
     #[error("Internal server error: {0}")]
     Internal(String),
+
+    /// 잘못된 또는 만료된 토큰
+    /// Invalid or expired token
+    #[error("Invalid or expired token")]
+    InvalidToken,
+
+    /// 토큰이 제공되지 않음
+    /// Token not provided
+    #[error("Token not provided")]
+    MissingToken,
 }
 
 /// AuthError를 HTTP 응답으로 변환
@@ -74,6 +84,9 @@ impl From<AuthError> for (StatusCode, Json<serde_json::Value>) {
             }
             AuthError::Internal(_) => {
                 (StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+            }
+            AuthError::InvalidToken | AuthError::MissingToken => {
+                (StatusCode::UNAUTHORIZED, err.to_string())
             }
         };
 

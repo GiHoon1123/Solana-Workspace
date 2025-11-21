@@ -58,6 +58,11 @@ pub struct SigninResponse {
     /// 사용자 정보 (비밀번호 제외)
     pub user: UserResponse,
 
+    /// JWT Access Token
+    /// JWT 액세스 토큰
+    #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
+    pub access_token: String,
+
     /// Success message
     /// 성공 메시지
     pub message: String,

@@ -8,11 +8,11 @@ use crate::services::AppState;
 // Create wallet router
 pub fn create_wallet_router() -> Router<AppState> {
     Router::new()
-        .route("/", post(wallet_handler::create_wallet))
+        .route("/", post(wallet_handler::create_wallet))  // 인증 필요
         .route("/:id", get(wallet_handler::get_wallet))
-        .route("/user/:user_id", get(wallet_handler::get_user_wallets))
+        .route("/my", get(wallet_handler::get_user_wallets))  // 인증 필요, 경로 변경: /user/:user_id -> /my
         .route("/:id/balance", get(wallet_handler::get_balance))
-        .route("/:id/transfer", post(wallet_handler::transfer_sol))
+        .route("/:id/transfer", post(wallet_handler::transfer_sol))  // 인증 필요
         .route("/transaction/:signature", get(wallet_handler::get_transaction_status))
 }
 

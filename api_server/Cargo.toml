@@ -41,3 +41,6 @@ argon2 = "0.5"
 # Base64 encoding (for private key storage)
 base64 = "0.21"
 
+# JWT (JSON Web Tokens)
+jsonwebtoken = "9.2"
+

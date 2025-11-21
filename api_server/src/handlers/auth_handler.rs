@@ -54,8 +54,20 @@ pub async fn signin(
         .await
         .map_err(|e: AuthError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
+    // JWT 토큰 발급
+    let access_token = app_state
+        .jwt_service
+        .generate_token(user.id, user.email.clone())
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": format!("Failed to generate token: {}", e) })),
+            )
+        })?;
+
     Ok(Json(SigninResponse {
         user: user.into(),
+        access_token,
         message: "Login successful".to_string(),
     }))
 }

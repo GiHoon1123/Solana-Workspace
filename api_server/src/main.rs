@@ -11,6 +11,7 @@ mod clients;
 mod database;
 mod services;
 mod errors;
+mod middleware;  // Added middleware module
 
 use routes::create_router;
 use crate::models::{
@@ -18,7 +19,7 @@ use crate::models::{
     TokenSearchRequest, TokenSearchResponse, Token,
     SwapTransactionRequest, SwapTransactionResponse, Transaction,
     SignupRequest, SignupResponse, SigninRequest, SigninResponse, UserResponse,
-    CreateWalletRequest, CreateWalletResponse, WalletResponse, WalletsResponse,
+    CreateWalletResponse, WalletResponse, WalletsResponse,  // CreateWalletRequest 제거 (JWT 토큰에서 user_id 추출)
     BalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
     SolanaWallet,
 };
@@ -58,8 +59,7 @@ use crate::services::AppState;
         SigninRequest,
         SigninResponse,
         UserResponse,
-        CreateWalletRequest,
-        CreateWalletResponse,
+        CreateWalletResponse,  // CreateWalletRequest 제거 (JWT 토큰에서 user_id 추출)
         WalletResponse,
         WalletsResponse,
         BalanceResponse,
@@ -68,6 +68,9 @@ use crate::services::AppState;
         TransactionStatusResponse,
         SolanaWallet
     )),
+    modifiers(
+        &SecurityAddon  // Security scheme 추가
+    ),
     tags(
         (name = "Swap", description = "Swap API endpoints (Jupiter integration)"),
         (name = "Tokens", description = "Token search API endpoints"),
@@ -81,6 +84,25 @@ use crate::services::AppState;
     )
 )]
 struct ApiDoc;
+
+// Security scheme 정의: Swagger UI에서 "Authorize" 버튼 추가
+struct SecurityAddon;
+
+impl utoipa::Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "BearerAuth",
+                utoipa::openapi::security::SecurityScheme::Http(
+                    utoipa::openapi::security::HttpBuilder::new()
+                        .scheme(utoipa::openapi::security::HttpAuthScheme::Bearer)
+                        .bearer_format("JWT")
+                        .build(),
+                ),
+            )
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() {
