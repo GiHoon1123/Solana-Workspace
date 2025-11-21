@@ -1,5 +1,6 @@
 use axum::Router;
 use tokio::net::TcpListener;
+use tower_http::cors::{CorsLayer, Any};
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -121,6 +122,14 @@ async fn main() {
     let app_state = AppState::new(db)
         .expect("Failed to initialize AppState");
 
+    // CORS 설정
+    // Allow requests from frontend (localhost:3003)
+    let cors = CorsLayer::new()
+        .allow_origin(Any)  // 개발 환경에서는 모든 origin 허용 (프로덕션에서는 특정 origin만 허용)
+        .allow_methods(Any)
+        .allow_headers(Any)
+        .allow_credentials(true);  // JWT 토큰을 위한 credentials 허용
+
     // Router 생성 (AppState를 State로 사용)
     // Create router (uses AppState as State)
     // Axum 0.7에서는 with_state를 최상위에 하면 nested Router들에도 자동으로 전파됨
@@ -130,6 +139,7 @@ async fn main() {
             SwaggerUi::new("/api")
                 .url("/api-docs/openapi.json", ApiDoc::openapi())
         )
+        .layer(cors)  // CORS 레이어 추가
         .with_state(app_state);  // AppState를 State로 - nested Router들에 자동 전파
 
     // 서버 시작: 3002 포트에서 리스닝
