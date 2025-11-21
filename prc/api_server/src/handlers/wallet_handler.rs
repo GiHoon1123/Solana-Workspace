@@ -3,8 +3,9 @@ use crate::models::{
     BalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
 };
 use crate::services::AppState;
+use crate::errors::WalletError;
 use axum::{extract::{Path, State}, http::StatusCode, Json};
-use serde_json::json;
+use std::convert::Into;
 
 /// 지갑 생성 핸들러
 /// Create wallet handler
@@ -27,14 +28,7 @@ pub async fn create_wallet(
         .wallet_service
         .create_wallet(request.user_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to create wallet: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(CreateWalletResponse {
         wallet,
@@ -65,19 +59,7 @@ pub async fn get_wallet(
         .wallet_service
         .get_wallet(wallet_id)
         .await
-        .map_err(|e| {
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (
-                status,
-                Json(json!({
-                    "error": format!("Failed to get wallet: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(WalletResponse { wallet }))
 }
@@ -104,14 +86,7 @@ pub async fn get_user_wallets(
         .wallet_service
         .get_user_wallets(user_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to get user wallets: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(WalletsResponse { wallets }))
 }
@@ -140,46 +115,20 @@ pub async fn get_balance(
         .wallet_service
         .get_wallet(wallet_id)
         .await
-        .map_err(|e| {
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (
-                status,
-                Json(json!({
-                    "error": format!("Failed to get wallet: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     // 잔액 조회
     let balance_lamports = app_state
         .wallet_service
         .get_balance(wallet_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to get balance: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     let balance_sol = app_state
         .wallet_service
         .get_balance_sol(wallet_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to get balance: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(BalanceResponse {
         balance_lamports,
@@ -214,21 +163,7 @@ pub async fn transfer_sol(
         .wallet_service
         .transfer_sol(wallet_id, &request.to_public_key, request.amount_lamports)
         .await
-        .map_err(|e| {
-            let status = if e.to_string().contains("not found") {
-                StatusCode::NOT_FOUND
-            } else if e.to_string().contains("insufficient") || e.to_string().contains("balance") {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (
-                status,
-                Json(json!({
-                    "error": format!("Failed to transfer SOL: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(TransferSolResponse {
         signature,
@@ -258,14 +193,7 @@ pub async fn get_transaction_status(
         .wallet_service
         .get_transaction_status(&signature)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({
-                    "error": format!("Failed to get transaction status: {}", e)
-                })),
-            )
-        })?;
+        .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(TransactionStatusResponse {
         signature,

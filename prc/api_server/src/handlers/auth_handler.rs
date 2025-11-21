@@ -1,7 +1,7 @@
 use crate::models::{SignupRequest, SignupResponse, SigninRequest, SigninResponse};
 use crate::services::AppState;
+use crate::errors::AuthError;
 use axum::{extract::State, http::StatusCode, Json};
-use serde_json::json;
 
 #[utoipa::path(
     post,
@@ -23,19 +23,7 @@ pub async fn signup(
         .auth_service
         .signup(request)
         .await
-        .map_err(|e| {
-            let status = if e.to_string().contains("already exists") {
-                StatusCode::BAD_REQUEST
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (
-                status,
-                Json(json!({
-                    "error": e.to_string()
-                })),
-            )
-        })?;
+        .map_err(|e: AuthError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(SignupResponse {
         user: user.into(),
@@ -64,19 +52,7 @@ pub async fn signin(
         .auth_service
         .signin(request)
         .await
-        .map_err(|e| {
-            let status = if e.to_string().contains("Invalid") {
-                StatusCode::UNAUTHORIZED
-            } else {
-                StatusCode::INTERNAL_SERVER_ERROR
-            };
-            (
-                status,
-                Json(json!({
-                    "error": e.to_string()
-                })),
-            )
-        })?;
+        .map_err(|e: AuthError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     Ok(Json(SigninResponse {
         user: user.into(),

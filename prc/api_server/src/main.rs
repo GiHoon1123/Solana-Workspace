@@ -10,6 +10,7 @@ mod models;
 mod clients;
 mod database;
 mod services;
+mod errors;
 
 use routes::create_router;
 use crate::models::{
