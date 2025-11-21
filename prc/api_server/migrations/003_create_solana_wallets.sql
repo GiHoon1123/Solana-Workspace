@@ -6,8 +6,8 @@ CREATE TABLE IF NOT EXISTS solana_wallets (
     user_id BIGINT NOT NULL,
     public_key VARCHAR(255) UNIQUE NOT NULL,
     encrypted_private_key TEXT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 인덱스 추가

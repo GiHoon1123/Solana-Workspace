@@ -10,6 +10,6 @@ CREATE TABLE IF NOT EXISTS transactions (
     transaction_bytes TEXT NOT NULL,
     quote_response JSONB,
     status VARCHAR(50) NOT NULL DEFAULT 'created',
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
