@@ -1,4 +1,5 @@
 use axum::Router;
+use axum::http::Method;
 use tokio::net::TcpListener;
 use tower_http::cors::{CorsLayer, Any};
 use utoipa::OpenApi;
@@ -124,10 +125,23 @@ async fn main() {
 
     // CORS 설정
     // Allow requests from frontend (localhost:3003)
+    // Note: allow_credentials(true)일 때 allow_origin을 *로 설정할 수 없음
+    // 따라서 명시적인 origin을 지정해야 함
+    use axum::http::HeaderValue;
     let cors = CorsLayer::new()
-        .allow_origin(Any)  // 개발 환경에서는 모든 origin 허용 (프로덕션에서는 특정 origin만 허용)
-        .allow_methods(Any)
-        .allow_headers(Any)
+        .allow_origin("http://localhost:3003".parse::<HeaderValue>().unwrap())  // 프론트엔드 origin 명시
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
+        .allow_headers([
+            axum::http::header::CONTENT_TYPE,
+            axum::http::header::AUTHORIZATION,
+            axum::http::header::ACCEPT,
+        ])
         .allow_credentials(true);  // JWT 토큰을 위한 credentials 허용
 
     // Router 생성 (AppState를 State로 사용)
