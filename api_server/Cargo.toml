@@ -44,3 +44,7 @@ base64 = "0.21"
 # JWT (JSON Web Tokens)
 jsonwebtoken = "9.2"
 
+# Crypto (for token hashing)
+sha2 = "0.10"
+rand = "0.8"
+

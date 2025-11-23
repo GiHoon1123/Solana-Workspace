@@ -58,13 +58,55 @@ pub struct SigninResponse {
     /// 사용자 정보 (비밀번호 제외)
     pub user: UserResponse,
 
-    /// JWT Access Token
-    /// JWT 액세스 토큰
+    /// JWT Access Token (짧은 수명)
+    /// JWT Access Token (short lifetime)
     #[schema(example = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...")]
     pub access_token: String,
+
+    /// Refresh Token (긴 수명, DB에 저장)
+    /// Refresh Token (long lifetime, stored in database)
+    #[schema(example = "abc123def456...")]
+    pub refresh_token: String,
 
     /// Success message
     /// 성공 메시지
     pub message: String,
+}
+
+// 토큰 갱신 요청 모델
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[schema(as = RefreshTokenRequest)]
+pub struct RefreshTokenRequest {
+    /// Refresh Token
+    /// 리프레시 토큰
+    #[schema(example = "abc123def456...")]
+    pub refresh_token: String,
+}
+
+// 토큰 갱신 응답 모델
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = RefreshTokenResponse)]
+pub struct RefreshTokenResponse {
+    /// 새 Access Token
+    /// New Access Token
+    pub access_token: String,
+
+    /// 새 Refresh Token
+    /// New Refresh Token
+    pub refresh_token: String,
+
+    /// Success message
+    /// 성공 메시지
+    pub message: String,
+}
+
+// 로그아웃 요청 모델
+#[derive(Debug, Serialize, Deserialize, ToSchema)]
+#[schema(as = LogoutRequest)]
+pub struct LogoutRequest {
+    /// Refresh Token
+    /// 리프레시 토큰
+    #[schema(example = "abc123def456...")]
+    pub refresh_token: String,
 }
 

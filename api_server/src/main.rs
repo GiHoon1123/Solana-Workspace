@@ -1,7 +1,7 @@
 use axum::Router;
 use axum::http::Method;
 use tokio::net::TcpListener;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -20,7 +20,8 @@ use crate::models::{
     QuoteRequest, QuoteResponse, RoutePlan, SwapInfo, 
     TokenSearchRequest, TokenSearchResponse, Token,
     SwapTransactionRequest, SwapTransactionResponse, Transaction,
-    SignupRequest, SignupResponse, SigninRequest, SigninResponse, UserResponse,
+    SignupRequest, SignupResponse, SigninRequest, SigninResponse, 
+    RefreshTokenRequest, RefreshTokenResponse, LogoutRequest, UserResponse,
     CreateWalletResponse, WalletResponse, WalletsResponse,  // CreateWalletRequest 제거 (JWT 토큰에서 user_id 추출)
     BalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
     SolanaWallet,
@@ -38,6 +39,8 @@ use crate::services::AppState;
         token_handler::search_tokens,
         auth_handler::signup,
         auth_handler::signin,
+        auth_handler::refresh,
+        auth_handler::logout,
         wallet_handler::create_wallet,
         wallet_handler::get_wallet,
         wallet_handler::get_user_wallets,
@@ -60,6 +63,9 @@ use crate::services::AppState;
         SignupResponse,
         SigninRequest,
         SigninResponse,
+        RefreshTokenRequest,
+        RefreshTokenResponse,
+        LogoutRequest,
         UserResponse,
         CreateWalletResponse,  // CreateWalletRequest 제거 (JWT 토큰에서 user_id 추출)
         WalletResponse,

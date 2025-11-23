@@ -21,12 +21,18 @@ impl AppState {
         let jwt_secret = std::env::var("JWT_SECRET")
             .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
 
+        // JWT Service 생성
+        let jwt_service = JwtService::new(jwt_secret.clone());
+
+        // Auth Service 생성 (JWT Service 주입)
+        let auth_service = AuthService::with_jwt_service(db.clone(), jwt_service.clone());
+
         Ok(Self {
-            auth_service: AuthService::new(db.clone()),
+            auth_service,
             swap_service: SwapService::new(db.clone()),
             token_service: TokenService::new(db.clone()),
             wallet_service: WalletService::new(db.clone())?,
-            jwt_service: JwtService::new(jwt_secret),
+            jwt_service,
         })
     }
 }

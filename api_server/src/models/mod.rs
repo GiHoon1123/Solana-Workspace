@@ -7,7 +7,8 @@ pub mod user;
 pub mod solana_wallet;
 pub mod auth;
 pub mod wallet;
-pub mod jwt;  // Added semicolon
+pub mod jwt;
+pub mod refresh_token;  // Added refresh_token module
 
 pub use swap::*;
 pub use tokens::*;

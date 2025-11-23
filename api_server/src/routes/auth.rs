@@ -10,5 +10,7 @@ pub fn create_auth_router() -> Router<AppState> {
     Router::new()
         .route("/signup", post(auth_handler::signup))
         .route("/signin", post(auth_handler::signin))
+        .route("/refresh", post(auth_handler::refresh))
+        .route("/logout", post(auth_handler::logout))
 }
 

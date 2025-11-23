@@ -1,7 +1,7 @@
 use axum::{
     async_trait,
     extract::FromRequestParts,
-    http::{request::Parts, StatusCode, HeaderMap},
+    http::{request::Parts, StatusCode},
 };
 use crate::services::AppState;
 use crate::errors::AuthError;
@@ -69,7 +69,7 @@ impl FromRequestParts<AppState> for AuthenticatedUser {
         // 3. JWT Service로 토큰 검증 (AppState에서 가져옴)
         let claims = state
             .jwt_service
-            .verify_token(token)
+            .verify_access_token(token)
             .map_err(|e| {
                 let status = match e {
                     AuthError::InvalidToken | AuthError::MissingToken => {
