@@ -41,6 +41,7 @@ use crate::services::AppState;
         auth_handler::signin,
         auth_handler::refresh,
         auth_handler::logout,
+        auth_handler::get_me,
         wallet_handler::create_wallet,
         wallet_handler::get_wallet,
         wallet_handler::get_user_wallets,

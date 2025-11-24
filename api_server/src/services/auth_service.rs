@@ -126,7 +126,7 @@ impl AuthService {
         // 4. DB에 저장
         let _ = refresh_token_repo
             .create(RefreshTokenCreate {
-                user_id,  // u64 -> i64 변환은 repository에서 처리
+                user_id,  // u64 유지 (repository에서 i64로 변환)
                 token_hash,
                 expires_at,
             })
@@ -242,5 +242,17 @@ impl AuthService {
             .map_err(|_| AuthError::InvalidCredentials)?;
 
         Ok(())
+    }
+
+    pub async fn get_user_info(&self, user_id:u64) -> Result<User, AuthError> {
+        let user_repo = UserRepository::new(self.db.pool().clone());
+
+        let user = user_repo
+            .get_user_by_id(user_id)
+            .await
+            .map_err(|e| AuthError::DatabaseError(format!("Failed to fetch user: {}", e)))?
+            .ok_or(AuthError::InvalidToken)?; // 사용자가 없으면 InvalidToken 에러
+            
+        Ok(user)
     }
 }

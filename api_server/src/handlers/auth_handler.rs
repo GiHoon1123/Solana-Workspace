@@ -1,10 +1,12 @@
 use crate::models::{
     SignupRequest, SignupResponse, SigninRequest, SigninResponse,
-    RefreshTokenRequest, RefreshTokenResponse, LogoutRequest
+    RefreshTokenRequest, RefreshTokenResponse, LogoutRequest,
+    UserResponse,
 };
 use crate::services::AppState;
 use crate::errors::AuthError;
 use axum::{extract::State, http::StatusCode, Json};
+use crate::middleware::auth::AuthenticatedUser; // 추가
 
 #[utoipa::path(
     post,
@@ -132,4 +134,31 @@ pub async fn logout(
     Ok(Json(serde_json::json!({
         "message": "Logout successful"
     })))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/auth/me",
+    responses(
+        (status = 200, description = "User info retrieved successfully", body = UserResponse),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("BearerAuth" = [])
+    ),
+    tag = "Auth"
+)]
+pub async fn get_me(
+    State(app_state): State<AppState>,
+    authenticated_user: AuthenticatedUser,
+) -> Result<Json<UserResponse>, (StatusCode, Json<serde_json::Value>)> {
+    // Service 호출 (비즈니스 로직)
+    let user = app_state
+        .auth_service
+        .get_user_info(authenticated_user.user_id)
+        .await
+        .map_err(|e: AuthError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
+
+    Ok(Json(user.into()))
 }
