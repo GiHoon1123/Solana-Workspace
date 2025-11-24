@@ -23,11 +23,8 @@ export default function LoginModal({ onClose, onSuccess, onSwitchToSignup }: Log
     setLoading(true);
 
     try {
-      const response = await apiClient.signin(formData);
-      
-      // 토큰 저장
-      localStorage.setItem('access_token', response.access_token);
-      
+      // apiClient.signin이 자동으로 토큰을 저장함
+      await apiClient.signin(formData);
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : '로그인에 실패했습니다.');

@@ -3,18 +3,16 @@
 import { useState, useEffect } from 'react';
 import LoginModal from './LoginModal';
 import SignupModal from './SignupModal';
+import { apiClient } from '@/lib/api';
 
 export default function Header() {
   const [showLogin, setShowLogin] = useState(false);
   const [showSignup, setShowSignup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
-  // 초기 로드 시 localStorage에서 토큰 확인
+  // 초기 로드 시 인증 상태 확인
   useEffect(() => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      setIsAuthenticated(true);
-    }
+    setIsAuthenticated(apiClient.isAuthenticated());
   }, []);
 
   const handleLoginSuccess = () => {
@@ -22,9 +20,15 @@ export default function Header() {
     setShowLogin(false);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('access_token');
-    setIsAuthenticated(false);
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout();
+      setIsAuthenticated(false);
+    } catch (error) {
+      console.error('Logout error:', error);
+      // 에러가 발생해도 로컬 상태는 업데이트
+      setIsAuthenticated(false);
+    }
   };
 
   return (
