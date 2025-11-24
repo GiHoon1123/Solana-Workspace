@@ -15,7 +15,7 @@ export default function Home() {
         {/* 중앙: 차트 + 주문 패널 */}
         <div className="flex-1 flex flex-col p-6 gap-6 overflow-hidden">
           {/* 차트 영역 */}
-          <div className="flex-[2] min-h-0">
+          <div className="flex-[1.5] min-h-0">
             <div className="mb-3">
               <h2 className="text-lg font-semibold text-white">{selectedMarket}</h2>
             </div>

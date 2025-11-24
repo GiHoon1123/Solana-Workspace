@@ -64,7 +64,7 @@ export default function OrderPanel() {
 
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-5 h-full flex flex-col">
-      <div className="flex mb-4">
+      <div className="flex mb-3 flex-shrink-0">
         <button
           onClick={() => setOrderType('buy')}
           className={`flex-1 py-2.5 px-4 rounded-l font-semibold text-sm transition-colors ${
@@ -87,56 +87,58 @@ export default function OrderPanel() {
         </button>
       </div>
 
-      <form onSubmit={handleSubmit} className="flex-1 flex flex-col space-y-4">
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">가격 (USDT)</label>
-          <input
-            type="number"
-            step="0.01"
-            value={price}
-            onChange={handlePriceChange}
-            placeholder="0.00"
-            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">수량 (SOL)</label>
-          <input
-            type="number"
-            step="0.0001"
-            value={amount}
-            onChange={handleAmountChange}
-            placeholder="0.0000"
-            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-          />
-          <div className="flex gap-2 mt-1.5">
-            {[25, 50, 75, 100].map((percent) => (
-              <button
-                key={percent}
-                type="button"
-                onClick={() => setPercentage(percent)}
-                className="flex-1 py-1 px-2 bg-gray-700 text-gray-300 text-xs rounded hover:bg-gray-600"
-              >
-                {percent}%
-              </button>
-            ))}
+      <form onSubmit={handleSubmit} className="flex-1 flex flex-col space-y-3 justify-between">
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">가격 (USDT)</label>
+            <input
+              type="number"
+              step="0.01"
+              value={price}
+              onChange={handlePriceChange}
+              placeholder="0.00"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
           </div>
-        </div>
 
-        <div>
-          <label className="block text-sm text-gray-400 mb-1">총액 (USDT)</label>
-          <input
-            type="text"
-            value={total}
-            readOnly
-            className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-gray-400"
-          />
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">수량 (SOL)</label>
+            <input
+              type="number"
+              step="0.0001"
+              value={amount}
+              onChange={handleAmountChange}
+              placeholder="0.0000"
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+            />
+            <div className="flex gap-2 mt-1.5">
+              {[25, 50, 75, 100].map((percent) => (
+                <button
+                  key={percent}
+                  type="button"
+                  onClick={() => setPercentage(percent)}
+                  className="flex-1 py-1 px-2 bg-gray-700 text-gray-300 text-xs rounded hover:bg-gray-600"
+                >
+                  {percent}%
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">총액 (USDT)</label>
+            <input
+              type="text"
+              value={total}
+              readOnly
+              className="w-full bg-gray-900 border border-gray-600 rounded px-3 py-2 text-sm text-gray-400"
+            />
+          </div>
         </div>
 
         <button
           type="submit"
-          className={`w-full py-2.5 rounded font-semibold transition-colors mt-auto ${
+          className={`w-full py-2.5 rounded font-semibold transition-colors ${
             orderType === 'buy'
               ? 'bg-blue-600 hover:bg-blue-700 text-white'
               : 'bg-red-600 hover:bg-red-700 text-white'
