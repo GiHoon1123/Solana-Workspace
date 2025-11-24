@@ -239,6 +239,50 @@ class ApiClient {
   isAuthenticated(): boolean {
     return TokenStorage.hasTokens();
   }
+
+  // 지갑 관련 API
+  async getUserWallets(): Promise<WalletsResponse> {
+    return this.request<WalletsResponse>('/api/wallets/my', {
+      method: 'GET',
+    });
+  }
+
+  async createWallet(): Promise<CreateWalletResponse> {
+    return this.request<CreateWalletResponse>('/api/wallets', {
+      method: 'POST',
+    });
+  }
+
+  async getWalletBalance(walletId: number): Promise<BalanceResponse> {
+    return this.request<BalanceResponse>(`/api/wallets/${walletId}/balance`, {
+      method: 'GET',
+    });
+  }
+}
+
+// 지갑 관련 타입
+export interface SolanaWallet {
+  id: number;
+  user_id: number;
+  public_key: string;
+  encrypted_private_key: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WalletsResponse {
+  wallets: SolanaWallet[];
+}
+
+export interface CreateWalletResponse {
+  wallet: SolanaWallet;
+  message: string;
+}
+
+export interface BalanceResponse {
+  balance_lamports: number;
+  balance_sol: number;
+  public_key: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

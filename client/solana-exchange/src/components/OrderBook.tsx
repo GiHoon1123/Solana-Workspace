@@ -150,71 +150,73 @@ export default function OrderBook() {
   }
 
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-5 h-full flex flex-col">
-      <h3 className="text-base font-semibold text-white mb-5">호가창</h3>
+    <div className="bg-gray-800 rounded-lg border border-gray-700 p-5 h-full flex flex-col overflow-hidden">
+      <h3 className="text-base font-semibold text-white mb-4 flex-shrink-0">호가창</h3>
       
-      {/* 매도 호가 */}
-      <div className="mb-5">
-        <div className="text-xs text-red-400 font-semibold mb-2">매도</div>
-        <div className="space-y-0.5">
-          {sellOrders.map((order, index) => (
-            <div
-              key={`sell-${index}`}
-              className="flex justify-between items-center text-sm hover:bg-gray-700 px-2 py-1 rounded"
-            >
-              <span className="text-red-400">
-                {order.price > 0 ? order.price.toFixed(2) : '--'}
-              </span>
-              <span className="text-gray-300">
-                {order.amount > 0 ? order.amount.toFixed(4) : '--'}
-              </span>
-              <span className="text-gray-400">
-                {order.total > 0 ? order.total.toFixed(2) : '--'}
-              </span>
-            </div>
-          ))}
+      <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+        {/* 매도 호가 */}
+        <div className="flex-shrink-0 mb-3">
+          <div className="text-xs text-red-400 font-semibold mb-2">매도</div>
+          <div className="space-y-0.5 max-h-32 overflow-y-auto">
+            {sellOrders.map((order, index) => (
+              <div
+                key={`sell-${index}`}
+                className="flex justify-between items-center text-sm hover:bg-gray-700 px-2 py-1 rounded"
+              >
+                <span className="text-red-400">
+                  {order.price > 0 ? order.price.toFixed(2) : '--'}
+                </span>
+                <span className="text-gray-300">
+                  {order.amount > 0 ? order.amount.toFixed(4) : '--'}
+                </span>
+                <span className="text-gray-400">
+                  {order.total > 0 ? order.total.toFixed(2) : '--'}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
 
-      {/* 현재가 */}
-      <div className="text-center py-3 border-y border-gray-700 my-3">
-        <div className="text-xl font-bold text-blue-400">
-          {currentPrice > 0 ? currentPrice.toFixed(2) : '--'}
+        {/* 현재가 */}
+        <div className="text-center py-3 border-y border-gray-700 my-3 flex-shrink-0">
+          <div className="text-xl font-bold text-blue-400">
+            {currentPrice > 0 ? currentPrice.toFixed(2) : '--'}
+          </div>
+          <div
+            className={`text-xs mt-1 ${
+              priceChange >= 0 ? 'text-blue-400' : 'text-red-400'
+            }`}
+          >
+            {currentPrice > 0 && (
+              <>
+                {priceChange >= 0 ? '+' : ''}
+                {priceChange.toFixed(2)}%
+              </>
+            )}
+          </div>
         </div>
-        <div
-          className={`text-xs mt-1 ${
-            priceChange >= 0 ? 'text-blue-400' : 'text-red-400'
-          }`}
-        >
-          {currentPrice > 0 && (
-            <>
-              {priceChange >= 0 ? '+' : ''}
-              {priceChange.toFixed(2)}%
-            </>
-          )}
-        </div>
-      </div>
 
-      {/* 매수 호가 */}
-      <div>
-        <div className="text-xs text-blue-400 font-semibold mb-2">매수</div>
-        <div className="space-y-0.5">
-          {buyOrders.map((order, index) => (
-            <div
-              key={`buy-${index}`}
-              className="flex justify-between items-center text-sm hover:bg-gray-700 px-2 py-1 rounded"
-            >
-              <span className="text-blue-400">
-                {order.price > 0 ? order.price.toFixed(2) : '--'}
-              </span>
-              <span className="text-gray-300">
-                {order.amount > 0 ? order.amount.toFixed(4) : '--'}
-              </span>
-              <span className="text-gray-400">
-                {order.total > 0 ? order.total.toFixed(2) : '--'}
-              </span>
-            </div>
-          ))}
+        {/* 매수 호가 */}
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="text-xs text-blue-400 font-semibold mb-2 flex-shrink-0">매수</div>
+          <div className="flex-1 overflow-y-auto space-y-0.5">
+            {buyOrders.map((order, index) => (
+              <div
+                key={`buy-${index}`}
+                className="flex justify-between items-center text-sm hover:bg-gray-700 px-2 py-1 rounded"
+              >
+                <span className="text-blue-400">
+                  {order.price > 0 ? order.price.toFixed(2) : '--'}
+                </span>
+                <span className="text-gray-300">
+                  {order.amount > 0 ? order.amount.toFixed(4) : '--'}
+                </span>
+                <span className="text-gray-400">
+                  {order.total > 0 ? order.total.toFixed(2) : '--'}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>

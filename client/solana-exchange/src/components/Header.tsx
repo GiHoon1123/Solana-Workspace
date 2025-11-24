@@ -1,11 +1,14 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import LoginModal from './LoginModal';
 import SignupModal from './SignupModal';
 import { apiClient } from '@/lib/api';
 
 export default function Header() {
+  const router = useRouter();
   const [showLogin, setShowLogin] = useState(false);
   const [showSignup, setShowSignup] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -37,17 +40,20 @@ export default function Header() {
         <div className="max-w-[1920px] mx-auto px-6">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
-            <div className="flex items-center">
+            <Link href="/" className="flex items-center hover:opacity-80 transition-opacity">
               <h1 className="text-xl font-bold text-white">Solana Exchange</h1>
-            </div>
+            </Link>
 
             {/* Right side - Auth buttons */}
             <div className="flex items-center gap-4">
               {isAuthenticated ? (
                 <>
-                  <button className="text-gray-300 hover:text-white px-4 py-2">
+                  <Link
+                    href="/mypage"
+                    className="text-gray-300 hover:text-white px-4 py-2 transition-colors"
+                  >
                     마이페이지
-                  </button>
+                  </Link>
                   <button
                     onClick={handleLogout}
                     className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded transition-colors"
