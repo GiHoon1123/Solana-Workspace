@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Header from "@/components/Header";
+import AutoLogoutProvider from "@/components/AutoLogoutProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -15,8 +16,10 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className="bg-gray-900 text-white min-h-screen">
-        <Header />
-        {children}
+        <AutoLogoutProvider>
+          <Header />
+          {children}
+        </AutoLogoutProvider>
       </body>
     </html>
   );
