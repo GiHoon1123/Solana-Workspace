@@ -40,20 +40,33 @@ export default function MyPagePage() {
       return;
     }
 
-    // localStorage에서 유저 정보 가져오기 (로그인 시 저장된 정보)
-    const storedUser = localStorage.getItem('user_info');
-    if (storedUser) {
+    // API에서 유저 정보 가져오기
+    const fetchUserInfo = async () => {
       try {
-        const user = JSON.parse(storedUser);
+        const user = await apiClient.getMe();
         setUserInfo({
           email: user.email || null,
           username: user.username || null,
         });
-      } catch (e) {
-        console.error('Failed to parse user info:', e);
+      } catch (err) {
+        console.error('유저 정보 조회 실패:', err);
+        // API 실패 시 localStorage에서 가져오기 (fallback)
+        const storedUser = localStorage.getItem('user_info');
+        if (storedUser) {
+          try {
+            const user = JSON.parse(storedUser);
+            setUserInfo({
+              email: user.email || null,
+              username: user.username || null,
+            });
+          } catch (e) {
+            console.error('Failed to parse user info:', e);
+          }
+        }
       }
-    }
+    };
 
+    fetchUserInfo();
     fetchWalletData();
   }, [router]);
 

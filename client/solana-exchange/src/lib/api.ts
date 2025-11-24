@@ -240,6 +240,13 @@ class ApiClient {
     return TokenStorage.hasTokens();
   }
 
+  // 유저 정보 조회
+  async getMe(): Promise<UserResponse> {
+    return this.request<UserResponse>('/api/auth/me', {
+      method: 'GET',
+    });
+  }
+
   // 지갑 관련 API
   async getUserWallets(): Promise<WalletsResponse> {
     return this.request<WalletsResponse>('/api/wallets/my', {
