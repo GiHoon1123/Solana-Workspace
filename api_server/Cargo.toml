@@ -49,3 +49,6 @@ jsonwebtoken = "9.2"
 sha2 = "0.10"
 rand = "0.8"
 
+# Async trait (for Engine trait)
+async-trait = "0.1"
+
