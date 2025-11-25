@@ -2,6 +2,7 @@ use crate::shared::database::Database;
 use crate::domains::auth::services::state::AuthState;
 use crate::domains::wallet::services::state::WalletState;
 use crate::domains::swap::services::state::SwapState;
+use crate::domains::cex::services::state::CexState;
 use crate::domains::auth::services::JwtService;
 use anyhow::Result;
 
@@ -15,6 +16,7 @@ pub struct AppState {
     pub auth_state: AuthState,
     pub wallet_state: WalletState,
     pub swap_state: SwapState,
+    pub cex_state: CexState,
 }
 
 impl AppState {
@@ -30,12 +32,14 @@ impl AppState {
         let auth_state = AuthState::new(db.clone(), jwt_service);
         let wallet_state = WalletState::new(db.clone())?;
         let swap_state = SwapState::new(db.clone());
+        let cex_state = CexState::new(db.clone());
 
         // 3. AppState 조합
         Ok(Self {
             auth_state,
             wallet_state,
             swap_state,
+            cex_state,
         })
     }
 }

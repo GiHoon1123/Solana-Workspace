@@ -18,6 +18,7 @@ use crate::shared::services::AppState;
 use crate::domains::swap::models::*;
 use crate::domains::auth::models::*;
 use crate::domains::wallet::models::*;
+use crate::domains::cex::models::*;
 
 // OpenAPI 스키마 정의: Swagger 문서 자동 생성
 #[derive(OpenApi)]
@@ -36,7 +37,9 @@ use crate::domains::wallet::models::*;
         crate::domains::wallet::handlers::wallet_handler::get_user_wallets,
         crate::domains::wallet::handlers::wallet_handler::get_balance,
         crate::domains::wallet::handlers::wallet_handler::transfer_sol,
-        crate::domains::wallet::handlers::wallet_handler::get_transaction_status
+        crate::domains::wallet::handlers::wallet_handler::get_transaction_status,
+        crate::domains::cex::handlers::balance_handler::get_all_balances,
+        crate::domains::cex::handlers::balance_handler::get_balance
     ),
     components(schemas(
         QuoteRequest,
@@ -64,7 +67,10 @@ use crate::domains::wallet::models::*;
         TransferSolRequest,
         TransferSolResponse,
         TransactionStatusResponse,
-        SolanaWallet
+        SolanaWallet,
+        UserBalance,
+        ExchangeBalancesResponse,
+        ExchangeBalanceResponse
     )),
     modifiers(
         &SecurityAddon
@@ -73,7 +79,8 @@ use crate::domains::wallet::models::*;
         (name = "Swap", description = "Swap API endpoints (Jupiter integration)"),
         (name = "Tokens", description = "Token search API endpoints"),
         (name = "Auth", description = "Authentication API endpoints"),
-        (name = "Wallets", description = "Wallet API endpoints (Solana wallet management)")
+        (name = "Wallets", description = "Wallet API endpoints (Solana wallet management)"),
+        (name = "CEX Balances", description = "CEX Exchange balance API endpoints")
     ),
     info(
         title = "Solana API Server",
