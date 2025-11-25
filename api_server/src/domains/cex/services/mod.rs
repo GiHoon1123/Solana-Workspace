@@ -3,9 +3,13 @@
 
 pub mod balance_service;
 pub mod fee_service;
+pub mod order_service;
+pub mod trade_service;
 pub mod state;
 
 pub use balance_service::*;
 pub use fee_service::*;
+pub use order_service::*;
+pub use trade_service::*;
 pub use state::*;
 
