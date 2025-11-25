@@ -75,6 +75,14 @@ COMMENT ON COLUMN fee_configs.is_active IS '활성화 여부 (false면 이전 �
 COMMENT ON COLUMN fee_configs.created_at IS '수수료 설정 생성 시간';
 COMMENT ON COLUMN fee_configs.updated_at IS '수수료 설정 마지막 업데이트 시간';
 
+-- UNIQUE 제약 추가 (중복 방지)
+-- 활성화된 설정에 대해서만 거래쌍 조합이 고유해야 함
+-- (base_mint, quote_mint) 조합은 활성화된 설정에서 중복 불가
+-- NULL 값 처리: COALESCE로 NULL을 ''로 변환하여 UNIQUE 체크
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fee_configs_unique_pair 
+    ON fee_configs(COALESCE(base_mint, ''), COALESCE(quote_mint, ''), is_active) 
+    WHERE is_active = TRUE;
+
 -- 인덱스 생성 (성능 최적화)
 -- 거래쌍별 수수료 조회 시 사용 (거래 발생 시 수수료율을 빠르게 조회)
 CREATE INDEX IF NOT EXISTS idx_fee_configs_pair ON fee_configs(base_mint, quote_mint, is_active) 
@@ -91,7 +99,14 @@ CREATE INDEX IF NOT EXISTS idx_fee_configs_active ON fee_configs(is_active)
 -- 모든 거래쌍에 0.01% (0.0001) 수수료를 적용합니다.
 -- =====================================================
 
+-- 초기 데이터 삽입 (중복 체크 포함)
+-- 이미 (NULL, NULL, TRUE) 조합이 있으면 삽입하지 않음
 INSERT INTO fee_configs (base_mint, quote_mint, fee_rate, fee_type, is_active)
-VALUES (NULL, NULL, 0.0001, 'both', TRUE)
-ON CONFLICT DO NOTHING;  -- 이미 있으면 중복 삽입 안 함
+SELECT NULL, NULL, 0.0001, 'both', TRUE
+WHERE NOT EXISTS (
+    SELECT 1 FROM fee_configs 
+    WHERE base_mint IS NULL 
+      AND quote_mint IS NULL 
+      AND is_active = TRUE
+);
 
