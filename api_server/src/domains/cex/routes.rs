@@ -1,20 +1,78 @@
-// CEX domain routes
-// CEX 도메인 라우터
-use axum::{routing::get, Router};
-use crate::domains::cex::handlers::balance_handler;
+use axum::{
+    routing::{get, post, delete},
+    Router,
+};
 use crate::shared::services::AppState;
 
-/// Create CEX router
+use super::handlers;
+
 /// CEX 라우터 생성
+/// Create CEX router
+/// 
+/// 거래소 관련 모든 API 엔드포인트를 등록합니다.
 /// 
 /// # Routes
-/// * `GET /balances` - 모든 잔고 조회 (인증 필요)
-/// * `GET /balances/{mint}` - 특정 자산 잔고 조회 (인증 필요)
+/// 
+/// ## Orders (주문)
+/// - `POST   /api/cex/orders` - 주문 생성
+/// - `DELETE /api/cex/orders/:id` - 주문 취소
+/// - `GET    /api/cex/orders/:id` - 주문 조회
+/// - `GET    /api/cex/orders/my` - 내 주문 목록
+/// - `GET    /api/cex/orderbook` - 오더북 조회
+/// 
+/// ## Trades (체결)
+/// - `GET    /api/cex/trades` - 거래쌍별 체결 내역
+/// - `GET    /api/cex/trades/my` - 내 체결 내역
+/// - `GET    /api/cex/price` - 최근 체결 가격
+/// - `GET    /api/cex/volume` - 24시간 거래량
+/// 
+/// ## Balances (잔고)
+/// - `GET    /api/cex/balances` - 내 잔고 조회
+/// - `POST   /api/cex/balances` - 잔고 초기화
 pub fn create_cex_router() -> Router<AppState> {
     Router::new()
-        // 잔고 관련 라우트
-        // Balance routes
-        .route("/balances", get(balance_handler::get_all_balances))
-        .route("/balances/:mint", get(balance_handler::get_balance))
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Orders (주문)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        // 주문 생성
+        .route("/orders", post(handlers::create_order))
+        
+        // 주문 취소 & 조회
+        .route("/orders/:order_id",
+            delete(handlers::cancel_order)
+                .get(handlers::get_order)
+        )
+        
+        // 내 주문 목록 (주의: /orders/my가 /orders/:order_id보다 먼저 와야 함!)
+        .route("/orders/my", get(handlers::get_my_orders))
+        
+        // 오더북 조회
+        .route("/orderbook", get(handlers::get_orderbook))
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Trades (체결)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        // 거래쌍별 체결 내역
+        .route("/trades", get(handlers::get_trades))
+        
+        // 내 체결 내역
+        .route("/trades/my", get(handlers::get_my_trades))
+        
+        // 최근 체결 가격
+        .route("/price", get(handlers::get_latest_price))
+        
+        // 24시간 거래량
+        .route("/volume", get(handlers::get_24h_volume))
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Balances (잔고)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        // 내 잔고 조회
+        .route("/balances", get(handlers::get_all_balances))
+        
+        // 특정 자산 잔고 조회
+        .route("/balances/:mint", get(handlers::get_balance))
 }
-

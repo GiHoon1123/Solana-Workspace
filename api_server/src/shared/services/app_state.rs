@@ -1,8 +1,10 @@
+use std::sync::Arc;
 use crate::shared::database::Database;
 use crate::domains::auth::services::state::AuthState;
 use crate::domains::wallet::services::state::WalletState;
 use crate::domains::swap::services::state::SwapState;
 use crate::domains::cex::services::state::CexState;
+use crate::domains::cex::engine::MockEngine;
 use crate::domains::auth::services::JwtService;
 use anyhow::Result;
 
@@ -32,7 +34,11 @@ impl AppState {
         let auth_state = AuthState::new(db.clone(), jwt_service);
         let wallet_state = WalletState::new(db.clone())?;
         let swap_state = SwapState::new(db.clone());
-        let cex_state = CexState::new(db.clone());
+        
+        // CEX 엔진 생성 (임시로 MockEngine 사용)
+        // TODO: 나중에 실제 HighPerfEngine으로 교체
+        let engine = Arc::new(MockEngine::new());
+        let cex_state = CexState::new(db.clone(), engine);
 
         // 3. AppState 조합
         Ok(Self {
