@@ -31,9 +31,10 @@ anchor-client = "0.30"
 anchor-lang = "0.30"
 
 # Database (PostgreSQL)
-sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid", "macros", "migrate"] }
+sqlx = { version = "0.6", default-features = false, features = ["runtime-tokio-native-tls", "postgres", "chrono", "uuid", "macros", "migrate", "decimal"] }
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.0", features = ["serde", "v4"] }
+rust_decimal = { version = "1.33", features = ["serde-with-str"] }  # For precise decimal calculations (orders, balances)
 
 # Password hashing
 argon2 = "0.5"

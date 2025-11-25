@@ -9,6 +9,10 @@ pub mod auth;
 pub mod wallet;
 pub mod jwt;
 pub mod refresh_token;  // Added refresh_token module
+pub mod order;  // CEX exchange orders
+pub mod trade;  // CEX exchange trades
+pub mod balance;  // CEX exchange user balances
+pub mod fee;  // CEX exchange fee configs
 
 pub use swap::*;
 pub use tokens::*;
@@ -18,3 +22,7 @@ pub use solana_wallet::*;
 pub use auth::*;
 pub use wallet::*;
 pub use jwt::*;
+pub use order::*;
+pub use trade::*;
+pub use balance::*;
+pub use fee::*;

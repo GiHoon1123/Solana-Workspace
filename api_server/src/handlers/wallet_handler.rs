@@ -1,6 +1,6 @@
 use crate::models::{
     CreateWalletResponse, WalletResponse, WalletsResponse,
-    BalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
+    WalletBalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
 };
 use crate::services::AppState;
 use crate::middleware::auth::AuthenticatedUser;
@@ -109,7 +109,7 @@ pub async fn get_user_wallets(
         ("id" = u64, Path, description = "Wallet ID")
     ),
     responses(
-        (status = 200, description = "Balance retrieved successfully", body = BalanceResponse),
+        (status = 200, description = "Balance retrieved successfully", body = WalletBalanceResponse),
         (status = 404, description = "Wallet not found"),
         (status = 500, description = "Internal server error")
     ),
@@ -118,7 +118,7 @@ pub async fn get_user_wallets(
 pub async fn get_balance(
     State(app_state): State<AppState>,
     Path(wallet_id): Path<u64>,
-) -> Result<Json<BalanceResponse>, (StatusCode, Json<serde_json::Value>)> {
+) -> Result<Json<WalletBalanceResponse>, (StatusCode, Json<serde_json::Value>)> {
     // 지갑 조회 (Public Key 가져오기)
     let wallet = app_state
         .wallet_service
@@ -139,7 +139,7 @@ pub async fn get_balance(
         .await
         .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
-    Ok(Json(BalanceResponse {
+    Ok(Json(WalletBalanceResponse {
         balance_lamports,
         balance_sol,
         public_key: wallet.public_key,

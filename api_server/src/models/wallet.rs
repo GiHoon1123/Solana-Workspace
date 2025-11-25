@@ -37,11 +37,11 @@ pub struct WalletsResponse {
     pub wallets: Vec<SolanaWallet>,
 }
 
-/// 잔액 조회 응답
-/// Get balance response
+/// 지갑 잔액 조회 응답
+/// Wallet balance response (blockchain balance)
 #[derive(Debug, Serialize, ToSchema)]
-#[schema(as = BalanceResponse)]
-pub struct BalanceResponse {
+#[schema(as = WalletBalanceResponse)]
+pub struct WalletBalanceResponse {
     /// 잔액 (lamports)
     /// Balance in lamports
     #[schema(example = 1000000000)]

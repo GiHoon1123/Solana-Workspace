@@ -23,7 +23,7 @@ use crate::models::{
     SignupRequest, SignupResponse, SigninRequest, SigninResponse, 
     RefreshTokenRequest, RefreshTokenResponse, LogoutRequest, UserResponse,
     CreateWalletResponse, WalletResponse, WalletsResponse,  // CreateWalletRequest 제거 (JWT 토큰에서 user_id 추출)
-    BalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
+        WalletBalanceResponse, TransferSolRequest, TransferSolResponse, TransactionStatusResponse,
     SolanaWallet,
 };
 use crate::handlers::{swap_handler, token_handler, auth_handler, wallet_handler};
@@ -71,7 +71,7 @@ use crate::services::AppState;
         CreateWalletResponse,  // CreateWalletRequest 제거 (JWT 토큰에서 user_id 추출)
         WalletResponse,
         WalletsResponse,
-        BalanceResponse,
+        WalletBalanceResponse,
         TransferSolRequest,
         TransferSolResponse,
         TransactionStatusResponse,
