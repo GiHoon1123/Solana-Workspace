@@ -11,8 +11,8 @@ use rust_decimal::Decimal;
 // 
 // 수수료 계산:
 // - 수수료 = 거래 금액 * fee_rate
-// - 예: fee_rate = 0.001 (0.1%), 거래 금액 = 100 USDT
-//   → 수수료 = 100 * 0.001 = 0.1 USDT
+// - 예: fee_rate = 0.0001 (0.01%), 거래 금액 = 100 USDT
+//   → 수수료 = 100 * 0.0001 = 0.01 USDT
 // 
 // 수수료 유형:
 // - 'taker': 시장가 주문자 수수료
@@ -39,11 +39,11 @@ pub struct FeeConfig {
     #[schema(example = "USDT")]
     pub quote_mint: Option<String>,
 
-    /// Fee rate (decimal, e.g., 0.001 = 0.1%)
-    /// 수수료율 (소수점, 예: 0.001 = 0.1%)
+    /// Fee rate (decimal, e.g., 0.0001 = 0.01%)
+    /// 수수료율 (소수점, 예: 0.0001 = 0.01%)
     /// Fee = trade_amount * fee_rate
     /// 수수료 = 거래 금액 * 수수료율
-    #[schema(example = 0.001)]
+    #[schema(example = 0.0001)]
     pub fee_rate: Decimal,
 
     /// Fee type: 'taker', 'maker', or 'both'

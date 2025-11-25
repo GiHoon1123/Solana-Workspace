@@ -6,21 +6,21 @@
 -- 
 -- 수수료 계산:
 -- - 수수료는 거래 금액의 일정 비율로 계산됩니다.
--- - 예: 수수료율 0.001 (0.1%), 거래 금액 100 USDT
---   → 수수료 = 100 * 0.001 = 0.1 USDT
+-- - 예: 수수료율 0.0001 (0.01%), 거래 금액 100 USDT
+--   → 수수료 = 100 * 0.0001 = 0.01 USDT
 -- 
 -- 수수료 적용 방식:
 -- - 매수자: 구매한 자산에서 수수료 차감 (예: SOL 구매 시 SOL에서 차감)
 -- - 매도자: 판매 금액에서 수수료 차감 (예: USDT로 전환 시 USDT에서 차감)
 -- 
 -- 예시:
--- - SOL/USDT 거래, 수수료율 0.001 (0.1%)
+-- - SOL/USDT 거래, 수수료율 0.0001 (0.01%)
 -- - 사용자 A가 SOL 1개를 100 USDT에 구매
---   → 매수자(A) 수수료: 100 * 0.001 = 0.1 USDT 차감
---   → 사용자 A: SOL +1.0, USDT -100.1
+--   → 매수자(A) 수수료: 100 * 0.0001 = 0.01 USDT 차감
+--   → 사용자 A: SOL +1.0, USDT -100.01
 -- 
 -- 확장성:
--- - 현재는 모든 거래쌍에 0.001 고정이지만
+-- - 현재는 모든 거래쌍에 0.0001 고정이지만
 -- - 나중에 거래쌍별, 사용자 등급별로 다른 수수료 적용 가능
 -- =====================================================
 
@@ -38,11 +38,11 @@ CREATE TABLE IF NOT EXISTS fee_configs (
     
     -- 수수료율 설정
     -- fee_rate: 거래 금액 대비 수수료 비율 (소수점)
-    -- - 0.001 = 0.1% 수수료
-    -- - 0.002 = 0.2% 수수료
-    -- - 0.0015 = 0.15% 수수료
+    -- - 0.0001 = 0.01% 수수료
+    -- - 0.0002 = 0.02% 수수료
+    -- - 0.00015 = 0.015% 수수료
     -- DECIMAL(10, 6): 최대 9,999,999.999999% (충분히 큼)
-    fee_rate DECIMAL(10, 6) NOT NULL DEFAULT 0.001,  -- 수수료율 (기본 0.1%)
+    fee_rate DECIMAL(10, 6) NOT NULL DEFAULT 0.0001,  -- 수수료율 (기본 0.01%)
     
     -- 수수료 적용 대상 (나중에 확장 가능)
     -- fee_type: 수수료 유형
@@ -69,7 +69,7 @@ COMMENT ON TABLE fee_configs IS '거래 수수료 설정 테이블 (거래쌍별
 COMMENT ON COLUMN fee_configs.id IS '수수료 설정 고유 ID';
 COMMENT ON COLUMN fee_configs.base_mint IS '기준 자산 (NULL이면 모든 거래쌍에 적용, 예: SOL, USDC)';
 COMMENT ON COLUMN fee_configs.quote_mint IS '기준 통화 (NULL이면 모든 거래쌍에 적용, 예: USDT)';
-COMMENT ON COLUMN fee_configs.fee_rate IS '수수료율 (소수점, 예: 0.001 = 0.1%, 기본값 0.1%)';
+COMMENT ON COLUMN fee_configs.fee_rate IS '수수료율 (소수점, 예: 0.0001 = 0.01%, 기본값 0.01%)';
 COMMENT ON COLUMN fee_configs.fee_type IS '수수료 유형: taker(시장가), maker(지정가), both(모두 동일)';
 COMMENT ON COLUMN fee_configs.is_active IS '활성화 여부 (false면 이전 설정 유지, 새 거래에 미적용)';
 COMMENT ON COLUMN fee_configs.created_at IS '수수료 설정 생성 시간';
@@ -85,13 +85,13 @@ CREATE INDEX IF NOT EXISTS idx_fee_configs_active ON fee_configs(is_active)
     WHERE is_active = TRUE;
 
 -- =====================================================
--- 초기 데이터 삽입 (모든 거래쌍에 0.1% 수수료 적용)
+-- 초기 데이터 삽입 (모든 거래쌍에 0.01% 수수료 적용)
 -- =====================================================
 -- 설명: 거래소 시작 시 기본 수수료 설정을 추가합니다.
--- 모든 거래쌍에 0.1% (0.001) 수수료를 적용합니다.
+-- 모든 거래쌍에 0.01% (0.0001) 수수료를 적용합니다.
 -- =====================================================
 
 INSERT INTO fee_configs (base_mint, quote_mint, fee_rate, fee_type, is_active)
-VALUES (NULL, NULL, 0.001, 'both', TRUE)
+VALUES (NULL, NULL, 0.0001, 'both', TRUE)
 ON CONFLICT DO NOTHING;  -- 이미 있으면 중복 삽입 안 함
 
