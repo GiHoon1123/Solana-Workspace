@@ -29,6 +29,7 @@ pub mod mock;
 use anyhow::Result;
 use async_trait::async_trait;
 use rust_decimal::Decimal;
+use chrono::Utc;
 
 pub use types::{
     TradingPair, OrderEntry, MatchResult, EngineEvent, OrderStatus,
@@ -365,8 +366,6 @@ pub fn order_to_entry(order: &crate::domains::cex::models::order::Order) -> Orde
 /// # Note
 /// 엔진에서 처리된 주문을 DB에 저장할 때 사용합니다.
 pub fn entry_to_order(entry: &OrderEntry) -> crate::domains::cex::models::order::Order {
-    use chrono::Utc;
-    
     // 주문 상태 결정
     let status = if entry.filled_amount == Decimal::ZERO {
         "pending".to_string()

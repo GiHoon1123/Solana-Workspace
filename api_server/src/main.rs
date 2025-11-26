@@ -1,5 +1,5 @@
 use axum::Router;
-use axum::http::Method;
+use axum::http::{Method, HeaderValue};
 use tokio::net::TcpListener;
 use tower_http::cors::CorsLayer;
 use utoipa::OpenApi;
@@ -126,7 +126,6 @@ async fn main() {
         .expect("Failed to initialize AppState");
 
     // CORS 설정
-    use axum::http::HeaderValue;
     let cors = CorsLayer::new()
         .allow_origin("http://localhost:3003".parse::<HeaderValue>().unwrap())
         .allow_methods([

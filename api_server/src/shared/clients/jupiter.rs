@@ -1,4 +1,4 @@
-use crate::domains::swap::models::{QuoteResponse, TokenSearchResponse, SwapTransactionRequest, SwapTransactionResponse};
+use crate::domains::swap::models::{QuoteResponse, TokenSearchResponse, SwapTransactionRequest, SwapTransactionResponse, Token};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use uuid::Uuid;
@@ -111,7 +111,6 @@ impl JupiterClient {
         }
 
         // JSON 파싱: 실제 API 응답은 배열이므로 Vec<Token>으로 파싱
-        use crate::domains::swap::models::Token;
         let tokens: Vec<Token> = response
             .json()
             .await

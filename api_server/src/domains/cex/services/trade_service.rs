@@ -1,6 +1,7 @@
 use crate::shared::database::{Database, TradeRepository, OrderRepository};
 use crate::domains::cex::models::trade::Trade;
 use anyhow::{Context, Result};
+use rust_decimal::Decimal;
 
 /// 체결 내역 서비스
 /// Trade Service
@@ -327,7 +328,6 @@ impl TradeService {
 
         // TODO: TradeRepository에 get_24h_volume 메서드 추가 필요
         // 일단 임시로 0 반환
-        use rust_decimal::Decimal;
         Ok((Decimal::ZERO, Decimal::ZERO))
         
         // 나중에 구현:
