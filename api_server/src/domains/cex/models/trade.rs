@@ -47,14 +47,14 @@ pub struct Trade {
     /// 체결 가격 (USDT 기준 체결 가격)
     /// Example: 100.0 means 1 SOL = 100 USDT
     /// 예: 100.0은 1 SOL = 100 USDT를 의미
-    #[schema(example = 100.0)]
+    #[schema(value_type = String, example = "100.0")]
     pub price: Decimal,
 
     /// Trade amount (executed amount in base asset)
     /// 체결 수량 (기준 자산 기준 체결된 수량)
     /// Example: 1.5 means 1.5 SOL was traded
     /// 예: 1.5는 1.5 SOL이 거래되었음을 의미
-    #[schema(example = 1.0)]
+    #[schema(value_type = String, example = "1.0")]
     pub amount: Decimal,
 
     /// Trade timestamp

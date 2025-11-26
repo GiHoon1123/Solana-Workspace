@@ -43,7 +43,7 @@ pub struct FeeConfig {
     /// 수수료율 (소수점, 예: 0.0001 = 0.01%)
     /// Fee = trade_amount * fee_rate
     /// 수수료 = 거래 금액 * 수수료율
-    #[schema(example = 0.0001)]
+    #[schema(value_type = String, example = "0.0001")]
     pub fee_rate: Decimal,
 
     /// Fee type: 'taker', 'maker', or 'both'

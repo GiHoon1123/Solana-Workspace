@@ -71,7 +71,7 @@ fn default_quote_mint() -> String {
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Trades"
+    tag = "CEX Trades"
 )]
 pub async fn get_trades(
     State(app_state): State<AppState>,
@@ -140,7 +140,7 @@ pub struct MyTradesQuery {
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Trades",
+    tag = "CEX Trades",
     security(
         ("BearerAuth" = [])
     )
@@ -227,7 +227,7 @@ pub struct LatestPriceQuery {
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Trades"
+    tag = "CEX Trades"
 )]
 pub async fn get_latest_price(
     State(app_state): State<AppState>,
@@ -318,7 +318,7 @@ pub struct VolumeQuery {
         (status = 400, description = "Bad request"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Trades"
+    tag = "CEX Trades"
 )]
 pub async fn get_24h_volume(
     State(app_state): State<AppState>,

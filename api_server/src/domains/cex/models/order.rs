@@ -57,21 +57,21 @@ pub struct Order {
     /// 지정가 가격 (시장가 주문은 NULL)
     /// Unit: USDT per base asset (e.g., 1 SOL = 100 USDT)
     /// 단위: 기준 자산당 USDT (예: 1 SOL = 100 USDT)
-    #[schema(example = 100.0)]
+    #[schema(value_type = Option<String>, example = "100.0")]
     pub price: Option<Decimal>,
 
     /// Order amount (in base asset)
     /// 주문 수량 (기준 자산 기준)
     /// Supports up to 9 decimal places
     /// 소수점 9자리까지 지원
-    #[schema(example = 1.0)]
+    #[schema(value_type = String, example = "1.0")]
     pub amount: Decimal,
 
     /// Filled amount (how much has been executed)
     /// 체결된 수량 (얼마나 체결되었는지)
     /// If filled_amount == amount, then order is fully filled
     /// filled_amount == amount면 주문이 전량 체결된 것
-    #[schema(example = 0.0)]
+    #[schema(value_type = String, example = "0.0")]
     pub filled_amount: Decimal,
 
     /// Order status: 'pending', 'partial', 'filled', or 'cancelled'
@@ -120,14 +120,14 @@ pub struct CreateOrderRequest {
     /// 지정가 가격 (지정가 주문 시 필수, 시장가 주문은 불필요)
     /// Unit: USDT per base asset
     /// 단위: 기준 자산당 USDT
-    #[schema(example = 100.0)]
+    #[schema(value_type = Option<String>, example = "100.0")]
     pub price: Option<Decimal>,
 
     /// Order amount (in base asset)
     /// 주문 수량 (기준 자산 기준)
     /// Supports decimal values (e.g., 0.1 SOL, 0.0001 SOL)
     /// 소수점 값 지원 (예: 0.1 SOL, 0.0001 SOL)
-    #[schema(example = 1.0)]
+    #[schema(value_type = String, example = "1.0")]
     pub amount: Decimal,
 }
 
@@ -172,17 +172,17 @@ pub struct OrdersResponse {
 pub struct OrderBookEntry {
     /// Price level
     /// 가격 레벨
-    #[schema(example = 100.0)]
+    #[schema(value_type = String, example = "100.0")]
     pub price: Decimal,
 
     /// Total amount at this price level
     /// 이 가격 레벨의 총 수량
-    #[schema(example = 5.5)]
+    #[schema(value_type = String, example = "5.5")]
     pub amount: Decimal,
 
     /// Total value (price * amount)
     /// 총 가치 (가격 * 수량)
-    #[schema(example = 550.0)]
+    #[schema(value_type = String, example = "550.0")]
     pub total: Decimal,
 }
 

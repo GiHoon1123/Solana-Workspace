@@ -39,7 +39,16 @@ use crate::domains::cex::models::*;
         crate::domains::wallet::handlers::wallet_handler::transfer_sol,
         crate::domains::wallet::handlers::wallet_handler::get_transaction_status,
         crate::domains::cex::handlers::balance_handler::get_all_balances,
-        crate::domains::cex::handlers::balance_handler::get_balance
+        crate::domains::cex::handlers::balance_handler::get_balance,
+        crate::domains::cex::handlers::order_handler::create_order,
+        crate::domains::cex::handlers::order_handler::cancel_order,
+        crate::domains::cex::handlers::order_handler::get_order,
+        crate::domains::cex::handlers::order_handler::get_my_orders,
+        crate::domains::cex::handlers::order_handler::get_orderbook,
+        crate::domains::cex::handlers::trade_handler::get_trades,
+        crate::domains::cex::handlers::trade_handler::get_my_trades,
+        crate::domains::cex::handlers::trade_handler::get_latest_price,
+        crate::domains::cex::handlers::trade_handler::get_24h_volume
     ),
     components(schemas(
         QuoteRequest,
@@ -70,7 +79,15 @@ use crate::domains::cex::models::*;
         SolanaWallet,
         UserBalance,
         ExchangeBalancesResponse,
-        ExchangeBalanceResponse
+        ExchangeBalanceResponse,
+        Order,
+        CreateOrderRequest,
+        OrderResponse,
+        OrdersResponse,
+        OrderBookEntry,
+        OrderBookResponse,
+        Trade,
+        TradesResponse
     )),
     modifiers(
         &SecurityAddon
@@ -80,7 +97,9 @@ use crate::domains::cex::models::*;
         (name = "Tokens", description = "Token search API endpoints"),
         (name = "Auth", description = "Authentication API endpoints"),
         (name = "Wallets", description = "Wallet API endpoints (Solana wallet management)"),
-        (name = "CEX Balances", description = "CEX Exchange balance API endpoints")
+        (name = "CEX Balances", description = "CEX Exchange balance API endpoints"),
+        (name = "CEX Orders", description = "CEX Exchange order API endpoints"),
+        (name = "CEX Trades", description = "CEX Exchange trade API endpoints")
     ),
     info(
         title = "Solana API Server",

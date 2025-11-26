@@ -49,7 +49,7 @@ use utoipa::{ToSchema, IntoParams};
         (status = 401, description = "Unauthorized (authentication required)"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Orders",
+    tag = "CEX Orders",
     security(
         ("BearerAuth" = [])
     )
@@ -105,7 +105,7 @@ pub async fn create_order(
         (status = 404, description = "Order not found"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Orders",
+    tag = "CEX Orders",
     security(
         ("BearerAuth" = [])
     )
@@ -158,7 +158,7 @@ pub async fn cancel_order(
         (status = 404, description = "Order not found"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Orders",
+    tag = "CEX Orders",
     security(
         ("BearerAuth" = [])
     )
@@ -233,7 +233,7 @@ pub struct MyOrdersQuery {
         (status = 401, description = "Unauthorized"),
         (status = 500, description = "Internal server error")
     ),
-    tag = "Orders",
+    tag = "CEX Orders",
     security(
         ("BearerAuth" = [])
     )

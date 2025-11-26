@@ -42,14 +42,14 @@ pub struct UserBalance {
     /// 사용 가능 잔고 (거래/출금 즉시 사용 가능)
     /// Supports up to 9 decimal places
     /// 소수점 9자리까지 지원
-    #[schema(example = 10.0)]
+    #[schema(value_type = String, example = "10.0")]
     pub available: Decimal,
 
     /// Locked balance (used in pending orders)
     /// 잠긴 잔고 (대기 중인 주문에 사용됨)
     /// Locked balance becomes available when order is filled or cancelled
     /// 주문이 체결되거나 취소되면 available로 전환됨
-    #[schema(example = 1.0)]
+    #[schema(value_type = String, example = "1.0")]
     pub locked: Decimal,
 
     /// Created timestamp
