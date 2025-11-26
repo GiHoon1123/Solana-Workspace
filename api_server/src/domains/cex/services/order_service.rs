@@ -1,9 +1,11 @@
 use std::sync::Arc;
-use crate::shared::database::{Database, OrderRepository, UserBalanceRepository};
-use crate::domains::cex::models::order::{Order, OrderCreate, CreateOrderRequest};
-use crate::domains::cex::engine::{Engine, TradingPair, order_to_entry};
+use std::time::{SystemTime, UNIX_EPOCH};
+use crate::shared::database::{Database, OrderRepository};
+use crate::domains::cex::models::order::{Order, CreateOrderRequest};
+use crate::domains::cex::engine::{Engine, TradingPair, OrderEntry, entry_to_order};
 use anyhow::{Context, Result, bail};
 use rust_decimal::Decimal;
+use chrono::Utc;
 
 /// 주문 서비스
 /// Order Service
@@ -129,51 +131,74 @@ impl OrderService {
         self.check_balance(user_id, &required_mint, required_amount).await?;
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 3. DB에 주문 저장
+        // 3. 주문 파라미터 준비
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let order_repo = OrderRepository::new(self.db.pool().clone());
+        // 실제로는 ID 생성기 사용 (Snowflake ID 등)
+        // 지금은 임시로 timestamp 기반 (나중에 개선)
+        let order_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
         
-        let order_create = OrderCreate {
-            user_id,
-            order_type: request.order_type.clone(),
-            order_side: request.order_side.clone(),
-            base_mint: request.base_mint.clone(),
-            quote_mint: request.quote_mint.clone().unwrap_or_else(|| "USDT".to_string()),
-            price: request.price,
-            amount: request.amount,
-        };
-
-        let order = order_repo
-            .create(&order_create)
-            .await
-            .context("Failed to create order in database")?;
+        // quote_mint 미리 결정 (여러 곳에서 사용되므로)
+        let quote_mint = request.quote_mint.unwrap_or_else(|| "USDT".to_string());
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 4. 엔진에 잔고 잠금 요청
+        // 4. 엔진에 잔고 잠금 요청 (먼저!)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 매수: quote_mint (USDT) 잠금
         // 매도: base_mint (SOL 등) 잠금
+        // 엔진의 인메모리 잔고에서 즉시 잠금 (마이크로초)
         self.engine
             .lock_balance(user_id, &required_mint, required_amount)
             .await
             .context("Failed to lock balance in engine")?;
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 5. 엔진에 주문 제출 (매칭 시도)
+        // 5. 엔진에 주문 즉시 제출 (블로킹 없음!)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let order_entry = order_to_entry(&order);
+        // OrderEntry 생성 (DB 주문 객체 없이)
+        let order_entry = OrderEntry {
+            id: order_id,
+            user_id,
+            order_type: request.order_type.clone(),
+            order_side: request.order_side.clone(),
+            base_mint: request.base_mint.clone(),
+            quote_mint: quote_mint.clone(),
+            price: request.price,
+            amount: request.amount,
+            filled_amount: Decimal::ZERO,
+            remaining_amount: request.amount,
+            created_at: Utc::now(),
+        };
         
-        // 엔진에 제출 (비동기로 매칭 시도)
-        // 체결 결과는 엔진이 알아서 DB에 저장함
+        // 엔진에 제출 (즉시 매칭 시도, 마이크로초 단위)
+        // 엔진이 내부적으로 WAL 기록 + DB 동기화 처리
+        // Service는 엔진의 구현 디테일을 모름 (Dependency Inversion)
         let _matches = self.engine
-            .submit_order(order_entry)
+            .submit_order(order_entry.clone())
             .await
             .context("Failed to submit order to engine")?;
 
-        // TODO: 체결 결과 로깅 또는 알림 (선택적)
-        // if !matches.is_empty() {
-        //     log::info!("Order {} matched {} times", order.id, matches.len());
-        // }
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 6. Order 객체 반환
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // DB 저장은 엔진의 백그라운드 워커가 처리
+        // (WAL → DB 동기화)
+        let order = Order {
+            id: order_id,
+            user_id,
+            order_type: request.order_type,
+            order_side: request.order_side,
+            base_mint: request.base_mint,
+            quote_mint,
+            price: request.price,
+            amount: request.amount,
+            filled_amount: Decimal::ZERO,
+            status: "pending".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        };
 
         Ok(order)
     }
@@ -374,8 +399,6 @@ impl OrderService {
             .context("Failed to get orderbook from engine")?;
 
         // OrderEntry → Order 변환
-        use crate::domains::cex::engine::entry_to_order;
-        
         let buy_orders: Vec<Order> = buy_entries
             .into_iter()
             .map(|entry| entry_to_order(&entry))
