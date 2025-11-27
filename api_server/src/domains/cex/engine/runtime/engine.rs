@@ -282,7 +282,7 @@ impl HighPerformanceEngine {
         }
     }
     
-    /// 엔진 시작
+    /// 엔진 시작 (내부 구현)
     /// 
     /// # 처리 과정
     /// 1. DB에서 활성 주문 로드
@@ -294,7 +294,8 @@ impl HighPerformanceEngine {
     /// 
     /// # Note
     /// 이 메서드는 `Engine` trait의 `start()`에서 호출됩니다.
-    pub async fn start_internal(&mut self) -> Result<()> {
+    /// `&mut self`를 사용하여 필드를 직접 수정합니다.
+    async fn start_impl(&mut self) -> Result<()> {
         // use crate::shared::database::repositories::{OrderRepository, UserBalanceRepository};
         // use crate::domains::cex::engine::order_to_entry;
         
@@ -382,14 +383,19 @@ impl HighPerformanceEngine {
         Ok(())
     }
     
-    /// 엔진 정지
+    /// 엔진 정지 (내부 구현)
     /// 
     /// # 처리 과정
     /// 1. 실행 플래그 해제
-    /// 2. 채널 닫기
-    /// 3. 스레드 종료 대기
-    /// 4. 최종 WAL 동기화
-    pub async fn stop_internal(&mut self) -> Result<()> {
+    /// 2. 채널 닫기 (스레드 루프 종료)
+    /// 3. 엔진 스레드 종료 대기
+    /// 4. WAL 스레드 종료 대기
+    /// 5. 최종 WAL 동기화
+    /// 
+    /// # Note
+    /// 이 메서드는 `Engine` trait의 `stop()`에서 호출됩니다.
+    /// `&mut self`를 사용하여 필드를 직접 수정합니다.
+    async fn stop_impl(&mut self) -> Result<()> {
         // 1. 실행 플래그 해제
         self.running.store(false, std::sync::atomic::Ordering::Relaxed);
         
@@ -586,18 +592,32 @@ impl Engine for HighPerformanceEngine {
     }
     
     /// 엔진 시작
-    async fn start(&self) -> Result<()> {
-        // &mut self가 필요한데 &self만 있음
-        // Arc<Mutex<>>로 감싸거나 다른 방법 필요
-        // 일단 임시로 에러 반환
-        Err(anyhow::anyhow!("start() requires &mut self, use start_internal() instead"))
+    /// 
+    /// # 처리 과정
+    /// 1. DB에서 잔고/주문 로드
+    /// 2. WAL 스레드 시작
+    /// 3. 엔진 스레드 시작
+    /// 4. 실행 플래그 설정
+    /// 
+    /// # Note
+    /// `&mut self`를 사용하여 필드를 직접 수정합니다.
+    /// 서버 시작 시 한 번만 호출됩니다.
+    async fn start(&mut self) -> Result<()> {
+        self.start_impl().await
     }
     
     /// 엔진 정지
-    async fn stop(&self) -> Result<()> {
-        // &mut self가 필요한데 &self만 있음
-        // 일단 임시로 에러 반환
-        Err(anyhow::anyhow!("stop() requires &mut self, use stop_internal() instead"))
+    /// 
+    /// # 처리 과정
+    /// 1. 실행 플래그 해제
+    /// 2. 채널 닫기
+    /// 3. 스레드 종료 대기
+    /// 
+    /// # Note
+    /// `&mut self`를 사용하여 필드를 직접 수정합니다.
+    /// 서버 종료 시 한 번만 호출됩니다.
+    async fn stop(&mut self) -> Result<()> {
+        self.stop_impl().await
     }
 }
 

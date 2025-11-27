@@ -83,12 +83,12 @@ impl Engine for MockEngine {
         Ok((Decimal::MAX, Decimal::ZERO))
     }
 
-    async fn start(&self) -> Result<()> {
+    async fn start(&mut self) -> Result<()> {
         // TODO: 실제 엔진 시작 로직 구현 필요
         Ok(())
     }
 
-    async fn stop(&self) -> Result<()> {
+    async fn stop(&mut self) -> Result<()> {
         // TODO: 실제 엔진 정지 로직 구현 필요
         Ok(())
     }
