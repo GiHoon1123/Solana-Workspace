@@ -294,8 +294,9 @@ impl HighPerformanceEngine {
     /// 
     /// # Note
     /// 이 메서드는 `Engine` trait의 `start()`에서 호출됩니다.
+    /// 엔진 시작 (내부 구현)
     /// `&mut self`를 사용하여 필드를 직접 수정합니다.
-    async fn start_impl(&mut self) -> Result<()> {
+    pub async fn start_impl(&mut self) -> Result<()> {
         use crate::shared::database::repositories::cex::{OrderRepository, UserBalanceRepository};
         use crate::domains::cex::engine::order_to_entry;
         use anyhow::Context;

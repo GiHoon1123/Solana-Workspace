@@ -146,8 +146,8 @@ async fn main() {
     
     // 엔진 시작 (DB에서 데이터 로드 및 스레드 시작)
     {
-        let mut engine = app_state.engine.lock().await;
-        engine.start().await
+        let mut engine_guard = app_state.engine.lock().await;
+        engine_guard.start_impl().await
             .expect("Failed to start engine");
     }
     
