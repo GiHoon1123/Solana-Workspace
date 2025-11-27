@@ -15,7 +15,7 @@
 // =====================================================
 
 use std::fs::{File, OpenOptions};
-use std::io::{Write, BufWriter};
+use std::io::{Write, BufWriter, BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use anyhow::{Result, Context};
 use serde::{Serialize, Deserialize};
@@ -230,8 +230,6 @@ impl WalReader {
     /// 3. JSON 파싱
     /// 4. WalEntry로 역직렬화
     pub fn read_all(&self) -> Result<Vec<WalEntry>> {
-        use std::io::{BufRead, BufReader};
-        
         let file = File::open(&self.file_path)
             .context("Failed to open WAL file for reading")?;
         
