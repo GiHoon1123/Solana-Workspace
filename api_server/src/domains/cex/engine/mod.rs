@@ -22,6 +22,7 @@ pub mod matcher;
 pub mod executor;
 pub mod balance_cache;
 pub mod wal;
+pub mod engine;
 
 // TODO: 나중에 구현
 // pub mod db_writer;
