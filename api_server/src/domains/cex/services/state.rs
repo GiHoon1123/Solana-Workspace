@@ -9,6 +9,7 @@ use crate::domains::cex::engine::Engine;
 /// CEX 도메인에서 필요한 서비스들을 포함하는 상태
 #[derive(Clone)]
 pub struct CexState {
+    pub engine: Arc<dyn Engine>,
     pub balance_service: BalanceService,
     pub fee_service: FeeService,
     pub order_service: OrderService,
@@ -24,6 +25,7 @@ impl CexState {
     /// * `engine` - 체결 엔진 (trait 객체)
     pub fn new(db: Database, engine: Arc<dyn Engine>) -> Self {
         Self {
+            engine: engine.clone(),
             balance_service: BalanceService::new(db.clone()),
             fee_service: FeeService::new(db.clone()),
             order_service: OrderService::new(db.clone(), engine),

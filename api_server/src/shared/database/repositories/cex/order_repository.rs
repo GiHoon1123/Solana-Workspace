@@ -323,6 +323,34 @@ impl OrderRepository {
         Ok(self.row_to_order(&row))
     }
 
+    /// 모든 활성 주문 조회 (엔진 시작 시 사용)
+    /// Get all active orders (used when engine starts)
+    /// 
+    /// # 사용 목적
+    /// 서버 재시작 시 모든 활성 주문을 메모리(OrderBook)에 로드
+    /// 
+    /// # 반환값
+    /// 모든 거래쌍의 활성 주문 목록 (status IN ('pending', 'partial'))
+    pub async fn get_all_active_orders(&self) -> Result<Vec<Order>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
+                   price, amount, filled_amount, status, created_at, updated_at
+            FROM orders
+            WHERE status IN ('pending', 'partial')
+            ORDER BY base_mint, quote_mint,
+                     CASE WHEN order_type = 'buy' THEN price END DESC NULLS LAST,
+                     CASE WHEN order_type = 'sell' THEN price END ASC NULLS LAST,
+                     created_at ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to fetch all active orders")?;
+
+        Ok(rows.iter().map(|r| self.row_to_order(r)).collect())
+    }
+
     /// Row를 Order로 변환하는 헬퍼 메서드
     /// Helper method to convert Row to Order
     fn row_to_order(&self, row: &sqlx::postgres::PgRow) -> Order {

@@ -296,49 +296,50 @@ impl HighPerformanceEngine {
     /// 이 메서드는 `Engine` trait의 `start()`에서 호출됩니다.
     /// `&mut self`를 사용하여 필드를 직접 수정합니다.
     async fn start_impl(&mut self) -> Result<()> {
-        // use crate::shared::database::repositories::{OrderRepository, UserBalanceRepository};
-        // use crate::domains::cex::engine::order_to_entry;
+        use crate::shared::database::repositories::cex::{OrderRepository, UserBalanceRepository};
+        use crate::domains::cex::engine::order_to_entry;
+        use anyhow::Context;
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. DB에서 잔고 로드
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
-        // TODO: UserBalanceRepository::get_all_balances() 구현 필요
-        // let balance_repo = UserBalanceRepository::new(self.db.pool().clone());
-        // let all_balances = balance_repo.get_all_balances().await
-        //     .context("Failed to load balances from database")?;
-        // 
-        // // BalanceCache에 로드
-        // {
-        //     let mut executor = self.executor.lock();
-        //     for balance in all_balances {
-        //         executor.balance_cache_mut().set_balance(
-        //             balance.user_id,
-        //             &balance.mint,
-        //             balance.available,
-        //             balance.locked,
-        //         );
-        //     }
-        // }
+        let balance_repo = UserBalanceRepository::new(self.db.pool().clone());
+        let all_balances = balance_repo.get_all_balances().await
+            .context("Failed to load balances from database")?;
+        
+        // BalanceCache에 로드
+        {
+            let mut executor = self.executor.lock();
+            for balance in all_balances {
+                executor.balance_cache_mut().set_balance(
+                    balance.user_id,
+                    &balance.mint_address,
+                    balance.available,
+                    balance.locked,
+                );
+            }
+        }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 2. DB에서 활성 주문 로드
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
-        // TODO: OrderRepository::get_active_orders() 구현 필요
-        // let order_repo = OrderRepository::new(self.db.pool().clone());
-        // let active_orders = order_repo.get_active_orders().await?;
-        // 
-        // // OrderBook에 로드
-        // {
-        //     let mut orderbooks = self.orderbooks.write();
-        //     for order in active_orders {
-        //         let entry = order_to_entry(&order);
-        //         let pair = TradingPair::new(entry.base_mint.clone(), entry.quote_mint.clone());
-        //         let orderbook = orderbooks.entry(pair).or_insert_with(|| OrderBook::new(pair));
-        //         orderbook.add_order(entry);
-        //     }
-        // }
+        let order_repo = OrderRepository::new(self.db.pool().clone());
+        let active_orders = order_repo.get_all_active_orders().await
+            .context("Failed to load active orders from database")?;
+        
+        // OrderBook에 로드
+        {
+            let mut orderbooks = self.orderbooks.write();
+            for order in active_orders {
+                let entry = order_to_entry(&order);
+                let pair = TradingPair::new(entry.base_mint.clone(), entry.quote_mint.clone());
+                let pair_clone = pair.clone();
+                let orderbook = orderbooks.entry(pair).or_insert_with(move || OrderBook::new(pair_clone));
+                orderbook.add_order(entry);
+            }
+        }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 3. WAL 스레드 시작

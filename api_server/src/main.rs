@@ -141,8 +141,17 @@ async fn main() {
         .expect("Failed to initialize database");
 
     // AppState 생성 (모든 Service 초기화)
-    let app_state = AppState::new(db)
+    let app_state = AppState::new(db.clone())
         .expect("Failed to initialize AppState");
+    
+    // 엔진 시작 (DB에서 데이터 로드 및 스레드 시작)
+    {
+        let mut engine = app_state.engine.lock().await;
+        engine.start().await
+            .expect("Failed to start engine");
+    }
+    
+    println!("✅ Engine started successfully");
 
     // CORS 설정
     let cors = CorsLayer::new()
