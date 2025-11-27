@@ -17,13 +17,13 @@
 
 pub mod types;
 pub mod mock;
+pub mod orderbook;
+pub mod matcher;
+pub mod executor;
+pub mod balance_cache;
+pub mod wal;
 
 // TODO: 나중에 구현
-// pub mod orderbook;
-// pub mod matcher;
-// pub mod executor;
-// pub mod balance_cache;
-// pub mod wal;
 // pub mod db_writer;
 
 use anyhow::Result;
