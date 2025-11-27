@@ -220,6 +220,14 @@ pub struct MatchResult {
     /// Sell order ID
     pub sell_order_id: u64,
     
+    /// 매수자 ID
+    /// Buyer user ID
+    pub buyer_id: u64,
+    
+    /// 매도자 ID
+    /// Seller user ID
+    pub seller_id: u64,
+    
     /// 체결 가격 (USDT 기준)
     /// Execution price (in USDT)
     /// 
