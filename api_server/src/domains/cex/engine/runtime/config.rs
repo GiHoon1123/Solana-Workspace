@@ -100,14 +100,55 @@ impl CoreConfig {
     ///     log::warn!("Failed to set core affinity to {}: {}", core, e);
     /// }
     /// ```
+    /// 코어 고정 설정 (활성화)
+    /// 
+    /// # Arguments
+    /// * `core_id` - 고정할 코어 번호 (None이면 고정 안 함)
+    /// 
+    /// # Note
+    /// 코어 고정 실패해도 경고만 출력하고 계속 진행
+    /// (권한 없거나 코어가 없을 수 있음)
     pub fn set_core(core_id: Option<usize>) {
         if let Some(core) = core_id {
-            // core_affinity crate 사용 (나중에 추가)
-            // use core_affinity::{set_for_current, CoreId};
-            // if let Err(e) = set_for_current(CoreId { id: core }) {
-            //     log::warn!("Failed to set core affinity to {}: {}", core, e);
-            // }
-            // 지금은 주석 처리 (의존성 추가 후 활성화)
+            use core_affinity::{set_for_current, CoreId};
+            if set_for_current(CoreId { id: core }) {
+                eprintln!("✅ Core affinity set to core {}", core);
+            } else {
+                eprintln!("⚠️  Failed to set core affinity to {}", core);
+                eprintln!("   This is normal if running without proper permissions");
+            }
+        }
+    }
+    
+    /// 실시간 스케줄링 설정 (활성화)
+    /// 
+    /// # Arguments
+    /// * `priority` - 스케줄링 우선순위 (1-99, 99가 최고)
+    /// 
+    /// # Note
+    /// Linux 환경에서만 동작하며, 루트 권한 또는 CAP_SYS_NICE 권한 필요
+    /// 실패해도 경고만 출력하고 계속 진행
+    pub fn set_realtime_scheduling(priority: u8) {
+        #[cfg(target_os = "linux")]
+        {
+            use nix::sched::{sched_setscheduler, SchedPolicy, SchedParam};
+            use nix::unistd::Pid;
+            
+            let params = SchedParam { sched_priority: priority as i32 };
+            match sched_setscheduler(Pid::from_raw(0), SchedPolicy::Fifo, &params) {
+                Ok(_) => {
+                    eprintln!("✅ Real-time scheduling enabled (priority: {})", priority);
+                }
+                Err(e) => {
+                    eprintln!("⚠️  Failed to set real-time scheduling: {}", e);
+                    eprintln!("   This is normal if running without root/CAP_SYS_NICE permissions");
+                }
+            }
+        }
+        
+        #[cfg(not(target_os = "linux"))]
+        {
+            eprintln!("⚠️  Real-time scheduling is only available on Linux");
         }
     }
 }

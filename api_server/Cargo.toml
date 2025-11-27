@@ -58,3 +58,9 @@ async-trait = "0.1"
 # Thread-safe primitives (RwLock, Mutex)
 parking_lot = "0.12"
 
+# CPU 코어 고정
+core_affinity = "0.8"
+
+# 실시간 스케줄링 (Linux only)
+nix = { version = "0.27", features = ["sched"] }
+

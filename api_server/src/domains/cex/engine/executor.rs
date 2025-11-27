@@ -25,10 +25,12 @@
 use rust_decimal::Decimal;
 use anyhow::{Result, Context as AnyhowContext};
 use chrono::Utc;
+use std::time::{SystemTime, UNIX_EPOCH};
 use crossbeam::channel::Sender;
 use crate::domains::cex::engine::types::MatchResult;
 use crate::domains::cex::engine::balance_cache::BalanceCache;
 use crate::domains::cex::engine::wal::WalEntry;
+use crate::domains::cex::engine::runtime::db_commands::DbCommand;
 
 /// 체결 실행 결과
 /// Executor가 처리한 결과를 담는 구조체
@@ -63,6 +65,8 @@ pub struct Executor {
     balance_cache: BalanceCache,
     /// WAL 메시지 발행 채널 (Option으로 감싸서 테스트 시 None 가능)
     wal_sender: Option<Sender<WalEntry>>,
+    /// DB Writer 채널 (Option으로 감싸서 테스트 시 None 가능)
+    db_sender: Option<Sender<DbCommand>>,
 }
 
 impl Executor {
@@ -78,10 +82,11 @@ impl Executor {
     /// 
     /// // WAL Thread에서 wal_rx로 메시지 수신 & 처리
     /// ```
-    pub fn new(wal_sender: Sender<WalEntry>) -> Self {
+    pub fn new(wal_sender: Sender<WalEntry>, db_sender: Option<Sender<DbCommand>>) -> Self {
         Self {
             balance_cache: BalanceCache::new(),
             wal_sender: Some(wal_sender),
+            db_sender,
         }
     }
     
@@ -89,10 +94,11 @@ impl Executor {
     /// 
     /// # Note
     /// 테스트에서는 WAL 메시지 발행을 생략
-    pub fn without_wal() -> Self {
+    pub fn new_without_wal() -> Self {
         Self {
             balance_cache: BalanceCache::new(),
             wal_sender: None,
+            db_sender: None,
         }
     }
     
@@ -168,7 +174,27 @@ impl Executor {
         ).context("Failed to transfer base asset from seller to buyer")?;
         
         // ============================================
-        // Step 3: WAL에 잔고 업데이트 메시지 발행
+        // Step 3: DB Writer 채널로 체결 내역 전송 (실시간)
+        // ============================================
+        if let Some(sender) = &self.db_sender {
+            let trade_id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
+            let cmd = DbCommand::InsertTrade {
+                trade_id,
+                buy_order_id: match_result.buy_order_id,
+                sell_order_id: match_result.sell_order_id,
+                buyer_id: match_result.buyer_id,
+                seller_id: match_result.seller_id,
+                price: match_result.price,
+                amount: match_result.amount,
+                base_mint: match_result.base_mint.clone(),
+                quote_mint: match_result.quote_mint.clone(),
+                timestamp: Utc::now(),
+            };
+            let _ = sender.send(cmd);  // Non-blocking (~100ns)
+        }
+        
+        // ============================================
+        // Step 4: WAL에 잔고 업데이트 메시지 발행
         // ============================================
         if let Some(sender) = &self.wal_sender {
             // 매수자 USDT 잔고
@@ -317,7 +343,7 @@ mod tests {
     #[test]
     fn test_executor_execute_trade() {
         // WAL 없이 테스트
-        let mut executor = Executor::without_wal();
+        let mut executor = Executor::new_without_wal();
         
         // 초기 잔고 설정
         // 매수자 (user 100): 1000 USDT
@@ -371,7 +397,7 @@ mod tests {
     
     #[test]
     fn test_executor_lock_balance() {
-        let mut executor = Executor::without_wal();
+        let mut executor = Executor::new_without_wal();
         
         // 초기 잔고: 1000 USDT
         executor.balance_cache_mut().set_balance(100, "USDT", Decimal::from(1000), Decimal::ZERO);
@@ -388,7 +414,7 @@ mod tests {
     
     #[test]
     fn test_executor_unlock_balance() {
-        let mut executor = Executor::without_wal();
+        let mut executor = Executor::new_without_wal();
         
         // 초기 잔고: 100 USDT locked
         executor.balance_cache_mut().set_balance(100, "USDT", Decimal::ZERO, Decimal::from(100));
@@ -405,7 +431,7 @@ mod tests {
     
     #[test]
     fn test_executor_insufficient_balance() {
-        let mut executor = Executor::without_wal();
+        let mut executor = Executor::new_without_wal();
         
         // 초기 잔고: 50 USDT locked (부족!)
         executor.balance_cache_mut().set_balance(100, "USDT", Decimal::ZERO, Decimal::from(50));
@@ -433,7 +459,7 @@ mod tests {
     #[test]
     fn test_executor_multiple_trades() {
         // 여러 체결 처리 테스트
-        let mut executor = Executor::without_wal();
+        let mut executor = Executor::new_without_wal();
         
         // 초기 잔고
         executor.balance_cache_mut().set_balance(100, "USDT", Decimal::ZERO, Decimal::from(1000));

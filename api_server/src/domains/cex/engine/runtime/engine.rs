@@ -38,6 +38,7 @@ use crate::domains::cex::engine::Engine;
 
 use super::commands::OrderCommand;
 use super::config::CoreConfig;
+use super::db_commands::DbCommand;
 
 /// 고성능 체결 엔진
 /// 
@@ -169,6 +170,34 @@ pub struct HighPerformanceEngine {
     /// - `stop()`에서 종료 대기
     wal_thread: Option<thread::JoinHandle<()>>,
     
+    /// DB Writer 스레드 핸들
+    /// 
+    /// DB Writer 스레드가 실행 중인지 확인하고 종료 시 대기할 때 사용
+    /// 
+    /// # 생명주기
+    /// - `start()`에서 생성
+    /// - `stop()`에서 종료 대기
+    db_writer_thread: Option<thread::JoinHandle<()>>,
+    
+    /// DB Writer 채널 (Sender)
+    /// 
+    /// 엔진 스레드에서 DB Writer 스레드로 명령을 전송할 때 사용
+    /// 
+    /// # 전송하는 명령
+    /// - InsertOrder
+    /// - UpdateOrderStatus
+    /// - InsertTrade
+    /// - UpdateBalance
+    db_tx: Sender<super::db_commands::DbCommand>,
+    
+    /// DB Writer 채널 (Receiver)
+    /// 
+    /// DB Writer 스레드에서 명령을 수신할 때 사용
+    /// 
+    /// # 사용 위치
+    /// - `db_writer_thread_loop()`에서 `db_rx.recv()` 호출
+    db_rx: Receiver<super::db_commands::DbCommand>,
+    
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 상태 관리
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -245,6 +274,10 @@ impl HighPerformanceEngine {
         // SPSC 패턴: Engine Thread (Producer) → WAL Thread (Consumer)
         let (wal_tx, wal_rx) = bounded(10_000);
         
+        // DB Writer 채널 (크기: 10,000)
+        // SPSC 패턴: Engine Thread (Producer) → DB Writer Thread (Consumer)
+        let (db_tx, db_rx) = bounded(10_000);
+        
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 2. 컴포넌트 초기화
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -255,8 +288,8 @@ impl HighPerformanceEngine {
         // Matcher: 상태 없음 (stateless), Arc로 공유
         let matcher = Arc::new(Matcher::new());
         
-        // Executor: BalanceCache 포함, WAL Sender 전달
-        let executor = Arc::new(Mutex::new(Executor::new(wal_tx.clone())));
+        // Executor: BalanceCache 포함, WAL Sender + DB Sender 전달
+        let executor = Arc::new(Mutex::new(Executor::new(wal_tx.clone(), Some(db_tx.clone()))));
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 3. WAL 디렉토리 경로
@@ -271,11 +304,14 @@ impl HighPerformanceEngine {
             order_rx,
             wal_tx,
             wal_rx,
+            db_tx,
+            db_rx,
             orderbooks,
             matcher,
             executor,
             engine_thread: None,
             wal_thread: None,
+            db_writer_thread: None,
             running: Arc::new(AtomicBool::new(false)),
             db,
             wal_dir,
@@ -343,7 +379,18 @@ impl HighPerformanceEngine {
         }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 3. WAL 스레드 시작
+        // 3. DB Writer 스레드 시작
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        let db_rx = self.db_rx.clone();
+        let db_pool = self.db.pool().clone();
+        let db_writer_thread = thread::spawn(move || {
+            super::threads::db_writer_thread_loop(db_rx, db_pool);
+        });
+        self.db_writer_thread = Some(db_writer_thread);
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 4. WAL 스레드 시작
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         let wal_rx = self.wal_rx.clone();
@@ -354,7 +401,7 @@ impl HighPerformanceEngine {
         self.wal_thread = Some(wal_thread);
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 4. 엔진 스레드 시작
+        // 5. 엔진 스레드 시작
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         let order_rx = self.order_rx.clone();

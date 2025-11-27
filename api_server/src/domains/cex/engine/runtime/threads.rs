@@ -10,9 +10,10 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use anyhow::Result;
+use anyhow::{Result, Context};
 use crossbeam::channel::Receiver;
 use parking_lot::{RwLock, Mutex};
+use sqlx::PgPool;
 
 use crate::domains::cex::engine::types::{TradingPair, OrderEntry, MatchResult};
 use crate::domains::cex::engine::orderbook::OrderBook;
@@ -84,11 +85,11 @@ pub fn engine_thread_loop(
     let config = CoreConfig::from_env();
     CoreConfig::set_core(Some(config.engine_core));
     
-    // TODO: 실시간 스케줄링 설정 (나중에 구현)
-    // use nix::sched::{sched_setscheduler, SchedPolicy, SchedParam};
-    // use nix::unistd::Pid;
-    // let params = SchedParam { sched_priority: 99 };
-    // sched_setscheduler(Pid::from_raw(0), SchedPolicy::Fifo, &params)?;
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 2. 실시간 스케줄링 설정 (우선순위 99)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    CoreConfig::set_realtime_scheduling(99);
     
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 2. 메인 루프
@@ -570,6 +571,8 @@ pub fn wal_thread_loop(
     let config = CoreConfig::from_env();
     CoreConfig::set_core(Some(config.wal_core));
     
+    // WAL 스레드는 실시간 스케줄링 불필요 (I/O 바운드)
+    
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 2. WalWriter 생성
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -602,5 +605,264 @@ pub fn wal_thread_loop(
             }
         }
     }
+}
+
+// =====================================================
+// DB Writer 스레드 루프
+// =====================================================
+// 역할: 메모리에서 DB 명령을 받아서 배치로 DB에 저장
+//
+// 처리 과정:
+// 1. 코어 고정 (Core 2, dev 환경만)
+// 2. DB 명령 수신 루프
+// 3. 배치로 모으기 (10ms 또는 100개)
+// 4. DB에 배치 쓰기 (트랜잭션)
+// =====================================================
+
+/// DB Writer 스레드 메인 루프
+/// 
+/// # Arguments
+/// * `db_rx` - DB 명령 수신 채널
+/// * `db_pool` - 데이터베이스 연결 풀
+/// 
+/// # 처리 흐름
+/// ```
+/// loop {
+///     db_rx.recv() → DbCommand
+///         ↓
+///     batch.push(cmd)
+///         ↓
+///     (10ms 또는 100개마다)
+///         ↓
+///     db.execute_batch(&batch)
+/// }
+/// ```
+/// 
+/// # 배치 전략
+/// - 시간 기반: 10ms마다 배치 쓰기
+/// - 크기 기반: 100개 모이면 즉시 쓰기
+/// - 트랜잭션: 여러 작업을 하나의 트랜잭션으로 묶기
+pub fn db_writer_thread_loop(
+    db_rx: Receiver<super::db_commands::DbCommand>,
+    db_pool: PgPool,
+) {
+    use super::db_commands::DbCommand;
+    use std::time::{Duration, Instant};
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 1. 코어 고정 (Core 2, dev 환경만)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    let config = CoreConfig::from_env();
+    if let Some(core) = config.db_writer_core {
+        CoreConfig::set_core(Some(core));
+    }
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 2. 배치 변수 초기화
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    let mut batch = Vec::new();
+    let batch_size_limit = 100;
+    let batch_time_limit = Duration::from_millis(10);
+    let mut last_flush = Instant::now();
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 3. 메인 루프 (Tokio 런타임 필요)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    
+    // Tokio 런타임 생성 (DB 작업은 async이므로)
+    let rt = tokio::runtime::Runtime::new()
+        .expect("Failed to create Tokio runtime for DB Writer");
+    
+    rt.block_on(async {
+        loop {
+            // 타임아웃 설정 (10ms)
+            let timeout = batch_time_limit.saturating_sub(last_flush.elapsed());
+            
+            match db_rx.recv_timeout(timeout) {
+                Ok(cmd) => {
+                    // 명령 수신
+                    batch.push(cmd);
+                    
+                    // 크기 기반 배치 쓰기 (100개 모이면)
+                    if batch.len() >= batch_size_limit {
+                        if let Err(e) = flush_batch(&mut batch, &db_pool).await {
+                            eprintln!("Failed to flush DB batch: {}", e);
+                        }
+                        last_flush = Instant::now();
+                    }
+                }
+                Err(crossbeam::channel::RecvTimeoutError::Timeout) => {
+                    // 시간 기반 배치 쓰기 (10ms 경과)
+                    if !batch.is_empty() {
+                        if let Err(e) = flush_batch(&mut batch, &db_pool).await {
+                            eprintln!("Failed to flush DB batch: {}", e);
+                        }
+                        last_flush = Instant::now();
+                    }
+                }
+                Err(crossbeam::channel::RecvTimeoutError::Disconnected) => {
+                    // 채널이 닫힘 (정상 종료)
+                    // 마지막 배치 쓰기
+                    if !batch.is_empty() {
+                        let _ = flush_batch(&mut batch, &db_pool).await;
+                    }
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// 배치를 DB에 쓰기 (async)
+/// 
+/// # Arguments
+/// * `batch` - DB 명령 배치
+/// * `db_pool` - 데이터베이스 연결 풀
+/// 
+/// # 처리 과정
+/// 1. 트랜잭션 시작
+/// 2. 각 명령 처리
+/// 3. 커밋
+async fn flush_batch(
+    batch: &mut Vec<super::db_commands::DbCommand>,
+    db_pool: &PgPool,
+) -> Result<()> {
+    use super::db_commands::DbCommand;
+    
+    if batch.is_empty() {
+        return Ok(());
+    }
+    
+    // 트랜잭션 시작
+    let mut tx = db_pool.begin().await
+        .context("Failed to begin transaction")?;
+    
+    // 각 명령 처리
+    for cmd in batch.drain(..) {
+        match cmd {
+            DbCommand::InsertOrder {
+                order_id,
+                user_id,
+                order_type,
+                order_side,
+                base_mint,
+                quote_mint,
+                price,
+                amount,
+                created_at,
+            } => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO orders (
+                        id, user_id, order_type, order_side, base_mint, quote_mint,
+                        price, amount, filled_amount, status, created_at, updated_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    ON CONFLICT (id) DO NOTHING
+                    "#
+                )
+                .bind(order_id as i64)
+                .bind(user_id as i64)
+                .bind(&order_type)
+                .bind(&order_side)
+                .bind(&base_mint)
+                .bind(&quote_mint)
+                .bind(&price)
+                .bind(&amount)
+                .bind(rust_decimal::Decimal::ZERO)  // filled_amount
+                .bind("pending")  // status
+                .bind(created_at)
+                .bind(created_at)
+                .execute(&mut *tx)
+                .await
+                .context("Failed to insert order")?;
+            }
+            
+            DbCommand::UpdateOrderStatus {
+                order_id,
+                status,
+                filled_amount,
+            } => {
+                sqlx::query(
+                    r#"
+                    UPDATE orders
+                    SET status = $1, filled_amount = $2, updated_at = $3
+                    WHERE id = $4
+                    "#
+                )
+                .bind(&status)
+                .bind(&filled_amount)
+                .bind(chrono::Utc::now())
+                .bind(order_id as i64)
+                .execute(&mut *tx)
+                .await
+                .context("Failed to update order status")?;
+            }
+            
+            DbCommand::InsertTrade {
+                trade_id,
+                buy_order_id,
+                sell_order_id,
+                buyer_id,
+                seller_id,
+                price,
+                amount,
+                base_mint,
+                quote_mint,
+                timestamp,
+            } => {
+                sqlx::query(
+                    r#"
+                    INSERT INTO trades (
+                        id, buy_order_id, sell_order_id, buyer_id, seller_id,
+                        price, amount, base_mint, quote_mint, created_at
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (id) DO NOTHING
+                    "#
+                )
+                .bind(trade_id as i64)
+                .bind(buy_order_id as i64)
+                .bind(sell_order_id as i64)
+                .bind(buyer_id as i64)
+                .bind(seller_id as i64)
+                .bind(&price)
+                .bind(&amount)
+                .bind(&base_mint)
+                .bind(&quote_mint)
+                .bind(timestamp)
+                .execute(&mut *tx)
+                .await
+                .context("Failed to insert trade")?;
+            }
+            
+            DbCommand::UpdateBalance {
+                user_id,
+                mint,
+                available_delta,
+                locked_delta,
+            } => {
+                use crate::shared::database::repositories::cex::UserBalanceRepository;
+                use crate::domains::cex::models::balance::UserBalanceUpdate;
+                
+                let balance_repo = UserBalanceRepository::new(db_pool.clone());
+                let update = UserBalanceUpdate {
+                    available_delta,
+                    locked_delta,
+                };
+                
+                balance_repo.update_balance(user_id, &mint, &update).await
+                    .context("Failed to update balance")?;
+            }
+        }
+    }
+    
+    // 트랜잭션 커밋
+    tx.commit().await
+        .context("Failed to commit transaction")?;
+    
+    Ok(())
 }
 
