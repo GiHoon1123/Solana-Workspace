@@ -55,3 +55,6 @@ crossbeam = "0.8"
 # Async trait (for Engine trait)
 async-trait = "0.1"
 
+# Thread-safe primitives (RwLock, Mutex)
+parking_lot = "0.12"
+
