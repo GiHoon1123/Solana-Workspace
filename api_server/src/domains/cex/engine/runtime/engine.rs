@@ -345,6 +345,9 @@ impl HighPerformanceEngine {
         let all_balances = balance_repo.get_all_balances().await
             .context("Failed to load balances from database")?;
         
+        // 디버깅: 조회된 잔고 개수 확인
+        eprintln!("[Engine Start] Found {} balances in database", all_balances.len());
+        
         // BalanceCache에 로드
         {
             let mut executor = self.executor.lock();
@@ -354,6 +357,10 @@ impl HighPerformanceEngine {
                     &balance.mint_address,
                     balance.available,
                     balance.locked,
+                );
+                eprintln!(
+                    "[Engine Start] Loaded balance: user_id={}, mint={}, available={}, locked={}",
+                    balance.user_id, balance.mint_address, balance.available, balance.locked
                 );
             }
         }
@@ -401,7 +408,13 @@ impl HighPerformanceEngine {
         self.wal_thread = Some(wal_thread);
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 5. 엔진 스레드 시작
+        // 5. 실행 플래그 설정 (스레드 시작 전에 설정)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        self.running.store(true, std::sync::atomic::Ordering::Relaxed);
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 6. 엔진 스레드 시작
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         let order_rx = self.order_rx.clone();
@@ -422,12 +435,6 @@ impl HighPerformanceEngine {
             );
         });
         self.engine_thread = Some(engine_thread);
-        
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 5. 실행 플래그 설정
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        
-        self.running.store(true, std::sync::atomic::Ordering::Relaxed);
         
         Ok(())
     }
@@ -634,7 +641,7 @@ impl Engine for HighPerformanceEngine {
         self.order_tx.send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send get_balance command: {}", e))?;
         
-        timeout(Duration::from_millis(100), rx)
+        timeout(Duration::from_secs(5), rx)
             .await
             .map_err(|_| anyhow::anyhow!("Get balance timeout"))?
             .map_err(|e| anyhow::anyhow!("Failed to receive response: {}", e))?
