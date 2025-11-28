@@ -97,14 +97,15 @@ pub fn engine_thread_loop(
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     
     loop {
-        // running 플래그 확인
-        if !running.load(std::sync::atomic::Ordering::Relaxed) {
-            break;
-        }
-        
         // 주문 명령 수신 (블로킹)
+        // 채널이 닫히면 Err를 반환하여 루프가 종료됩니다.
         match order_rx.recv() {
             Ok(cmd) => {
+                // running 플래그 확인 (명령 처리 전)
+                if !running.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+                
                 // 명령 처리
                 match cmd {
                     OrderCommand::SubmitOrder { order, response } => {
@@ -836,10 +837,8 @@ pub fn db_writer_thread_loop(
     
     rt.block_on(async {
         loop {
-            // 타임아웃 설정 (10ms)
-            let timeout = batch_time_limit.saturating_sub(last_flush.elapsed());
-            
-            match db_rx.recv_timeout(timeout) {
+            // 채널이 닫혔는지 먼저 확인 (논블로킹, 즉시 반환)
+            match db_rx.try_recv() {
                 Ok(cmd) => {
                     // 명령 수신
                     batch.push(cmd);
@@ -851,23 +850,77 @@ pub fn db_writer_thread_loop(
                         }
                         last_flush = Instant::now();
                     }
+                    continue; // 다음 루프로
                 }
-                Err(crossbeam::channel::RecvTimeoutError::Timeout) => {
-                    // 시간 기반 배치 쓰기 (10ms 경과)
-                    if !batch.is_empty() {
-                        if let Err(e) = flush_batch(&mut batch, &db_pool).await {
-                            eprintln!("Failed to flush DB batch: {}", e);
-                        }
-                        last_flush = Instant::now();
-                    }
-                }
-                Err(crossbeam::channel::RecvTimeoutError::Disconnected) => {
-                    // 채널이 닫힘 (정상 종료)
+                Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                    // 채널이 닫힘 (정상 종료) - 즉시 감지
                     // 마지막 배치 쓰기
                     if !batch.is_empty() {
                         let _ = flush_batch(&mut batch, &db_pool).await;
                     }
                     break;
+                }
+                Err(crossbeam::channel::TryRecvError::Empty) => {
+                    // 채널이 비어있지만 아직 열려있음
+                    // 타임아웃 설정 (10ms)
+                    let timeout = batch_time_limit.saturating_sub(last_flush.elapsed());
+                    
+                    if timeout == Duration::ZERO {
+                        // 시간 기반 배치 쓰기 (10ms 경과)
+                        if !batch.is_empty() {
+                            if let Err(e) = flush_batch(&mut batch, &db_pool).await {
+                                eprintln!("Failed to flush DB batch: {}", e);
+                            }
+                            last_flush = Instant::now();
+                        }
+                        // 채널이 닫혔는지 다시 확인 (논블로킹)
+                        match db_rx.try_recv() {
+                            Ok(cmd) => {
+                                batch.push(cmd);
+                                continue;
+                            }
+                            Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                                // 채널이 닫힘
+                                if !batch.is_empty() {
+                                    let _ = flush_batch(&mut batch, &db_pool).await;
+                                }
+                                break;
+                            }
+                            Err(crossbeam::channel::TryRecvError::Empty) => {
+                                // 여전히 비어있음 - 매우 짧은 대기 후 다시 확인
+                                tokio::time::sleep(Duration::from_micros(100)).await;
+                            }
+                        }
+                    } else {
+                        // 타임아웃까지 대기
+                        match db_rx.recv_timeout(timeout) {
+                            Ok(cmd) => {
+                                batch.push(cmd);
+                                if batch.len() >= batch_size_limit {
+                                    if let Err(e) = flush_batch(&mut batch, &db_pool).await {
+                                        eprintln!("Failed to flush DB batch: {}", e);
+                                    }
+                                    last_flush = Instant::now();
+                                }
+                            }
+                            Err(crossbeam::channel::RecvTimeoutError::Timeout) => {
+                                // 시간 기반 배치 쓰기 (10ms 경과)
+                                if !batch.is_empty() {
+                                    if let Err(e) = flush_batch(&mut batch, &db_pool).await {
+                                        eprintln!("Failed to flush DB batch: {}", e);
+                                    }
+                                    last_flush = Instant::now();
+                                }
+                            }
+                            Err(crossbeam::channel::RecvTimeoutError::Disconnected) => {
+                                // 채널이 닫힘 (정상 종료)
+                                if !batch.is_empty() {
+                                    let _ = flush_batch(&mut batch, &db_pool).await;
+                                }
+                                break;
+                            }
+                        }
+                    }
                 }
             }
         }

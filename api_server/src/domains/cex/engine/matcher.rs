@@ -52,7 +52,14 @@ impl Matcher {
         let mut matches = Vec::new();
         
         // 주문이 이미 완전히 체결되었으면 종료
-        if incoming_order.remaining_amount == Decimal::ZERO {
+        // 시장가 매수는 remaining_quote_amount를 사용하므로, remaining_amount만 확인하면 안 됨
+        let has_remaining = if let Some(remaining_quote) = incoming_order.remaining_quote_amount {
+            remaining_quote > Decimal::ZERO
+        } else {
+            incoming_order.remaining_amount > Decimal::ZERO
+        };
+        
+        if !has_remaining {
             return matches;
         }
         
@@ -80,8 +87,19 @@ impl Matcher {
         // 매도 호가가 비어있으면 매칭 불가
         let best_ask = match orderbook.get_best_ask() {
             Some(price) => price,
-            None => return, // 매도 호가 없음
+            None => {
+                eprintln!("[Matcher] No ask price available for buy order {}", buy_order.id);
+                return; // 매도 호가 없음
+            }
         };
+        
+        // 디버깅: 시장가 매수 주문의 remaining_quote_amount 확인
+        if buy_order.order_side == "market" {
+            eprintln!(
+                "[Matcher] Market buy order {}: remaining_quote_amount={:?}, remaining_amount={}, best_ask={}",
+                buy_order.id, buy_order.remaining_quote_amount, buy_order.remaining_amount, best_ask
+            );
+        }
         
         // 지정가 주문: 가격 확인
         if buy_order.order_side == "limit" {

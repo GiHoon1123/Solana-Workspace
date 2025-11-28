@@ -80,7 +80,7 @@ pub struct HighPerformanceEngine {
     /// - 링버퍼: 고정 크기 버퍼를 순환 사용
     /// - SPSC: Single Producer, Single Consumer
     /// - 성능: ~100ns (메모리 연산)
-    order_tx: Sender<OrderCommand>,
+    order_tx: Option<Sender<OrderCommand>>,
     
     /// 주문 명령 수신 채널 (Receiver)
     /// 
@@ -100,7 +100,7 @@ pub struct HighPerformanceEngine {
     /// - TradeExecuted
     /// - BalanceLocked
     /// - BalanceUpdated
-    wal_tx: Sender<WalEntry>,
+    wal_tx: Option<Sender<WalEntry>>,
     
     /// WAL 메시지 수신 채널 (Receiver)
     /// 
@@ -188,7 +188,7 @@ pub struct HighPerformanceEngine {
     /// - UpdateOrderStatus
     /// - InsertTrade
     /// - UpdateBalance
-    db_tx: Sender<super::db_commands::DbCommand>,
+    db_tx: Option<Sender<super::db_commands::DbCommand>>,
     
     /// DB Writer 채널 (Receiver)
     /// 
@@ -300,11 +300,11 @@ impl HighPerformanceEngine {
             .unwrap_or_else(|_| std::path::PathBuf::from("./wal"));
         
         Self {
-            order_tx,
+            order_tx: Some(order_tx),
             order_rx,
-            wal_tx,
+            wal_tx: Some(wal_tx),
             wal_rx,
-            db_tx,
+            db_tx: Some(db_tx),
             db_rx,
             orderbooks,
             matcher,
@@ -418,7 +418,7 @@ impl HighPerformanceEngine {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         let order_rx = self.order_rx.clone();
-        let wal_tx = self.wal_tx.clone();
+        let wal_tx = self.wal_tx.as_ref().unwrap().clone();
         let orderbooks = Arc::clone(&self.orderbooks);
         let matcher = Arc::clone(&self.matcher);
         let executor = Arc::clone(&self.executor);
@@ -452,22 +452,52 @@ impl HighPerformanceEngine {
     /// 이 메서드는 `Engine` trait의 `stop()`에서 호출됩니다.
     /// `&mut self`를 사용하여 필드를 직접 수정합니다.
     async fn stop_impl(&mut self) -> Result<()> {
+        eprintln!("[Engine Stop] Starting shutdown...");
+        
         // 1. 실행 플래그 해제
         self.running.store(false, std::sync::atomic::Ordering::Relaxed);
+        eprintln!("[Engine Stop] Running flag set to false");
         
-        // 2. 채널 닫기 (스레드 루프 종료)
-        drop(self.order_tx.clone());
-        drop(self.wal_tx.clone());
+        // 2. Executor의 채널 Sender 해제 (먼저 해제해야 채널이 닫힘)
+        // Executor가 가지고 있는 wal_sender와 db_sender도 drop해야 채널이 완전히 닫힙니다.
+        {
+            let mut executor = self.executor.lock();
+            executor.clear_channels();
+        }
+        eprintln!("[Engine Stop] Executor channels cleared");
+        
+        // 3. 채널 닫기 (스레드 루프 종료)
+        // Sender를 drop하면 채널이 닫히고, Receiver의 recv()가 Err를 반환하여 루프가 종료됩니다.
+        // clone()을 drop하는 것은 원본 Sender를 drop하지 않으므로 채널이 닫히지 않습니다.
+        // 따라서 원본을 직접 drop해야 합니다.
+        eprintln!("[Engine Stop] Closing channels...");
+        drop(self.order_tx.take());
+        eprintln!("[Engine Stop] order_tx closed");
+        drop(self.wal_tx.take());
+        eprintln!("[Engine Stop] wal_tx closed");
+        drop(self.db_tx.take());
+        eprintln!("[Engine Stop] db_tx closed");
         
         // 3. 스레드 종료 대기
+        eprintln!("[Engine Stop] Waiting for engine thread...");
         if let Some(handle) = self.engine_thread.take() {
             handle.join().map_err(|e| anyhow::anyhow!("Engine thread panicked: {:?}", e))?;
+            eprintln!("[Engine Stop] Engine thread joined");
         }
         
+        eprintln!("[Engine Stop] Waiting for WAL thread...");
         if let Some(handle) = self.wal_thread.take() {
             handle.join().map_err(|e| anyhow::anyhow!("WAL thread panicked: {:?}", e))?;
+            eprintln!("[Engine Stop] WAL thread joined");
         }
         
+        eprintln!("[Engine Stop] Waiting for DB Writer thread...");
+        if let Some(handle) = self.db_writer_thread.take() {
+            handle.join().map_err(|e| anyhow::anyhow!("DB Writer thread panicked: {:?}", e))?;
+            eprintln!("[Engine Stop] DB Writer thread joined");
+        }
+        
+        eprintln!("[Engine Stop] Shutdown complete");
         Ok(())
     }
 }
@@ -496,7 +526,7 @@ impl Engine for HighPerformanceEngine {
             response: tx,
         };
         
-        self.order_tx.send(cmd)
+        self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send order to engine: {}", e))?;
         
         // 결과 대기 (타임아웃: 100ms)
@@ -522,7 +552,7 @@ impl Engine for HighPerformanceEngine {
             response: tx,
         };
         
-        self.order_tx.send(cmd)
+        self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send cancel command: {}", e))?;
         
         timeout(Duration::from_millis(100), rx)
@@ -545,7 +575,7 @@ impl Engine for HighPerformanceEngine {
             response: tx,
         };
         
-        self.order_tx.send(cmd)
+        self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send get_orderbook command: {}", e))?;
         
         timeout(Duration::from_millis(100), rx)
@@ -594,7 +624,7 @@ impl Engine for HighPerformanceEngine {
             response: tx,
         };
         
-        self.order_tx.send(cmd)
+        self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send lock_balance command: {}", e))?;
         
         timeout(Duration::from_millis(100), rx)
@@ -619,7 +649,7 @@ impl Engine for HighPerformanceEngine {
             response: tx,
         };
         
-        self.order_tx.send(cmd)
+        self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send unlock_balance command: {}", e))?;
         
         timeout(Duration::from_millis(100), rx)
@@ -638,7 +668,7 @@ impl Engine for HighPerformanceEngine {
             response: tx,
         };
         
-        self.order_tx.send(cmd)
+        self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send get_balance command: {}", e))?;
         
         timeout(Duration::from_secs(5), rx)

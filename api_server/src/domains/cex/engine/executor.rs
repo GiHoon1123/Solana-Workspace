@@ -102,6 +102,14 @@ impl Executor {
         }
     }
     
+    /// 채널 Sender 해제 (엔진 종료 시 호출)
+    /// 
+    /// 모든 Sender를 drop하여 채널을 닫고 스레드 루프를 종료시킵니다.
+    pub fn clear_channels(&mut self) {
+        self.wal_sender = None;
+        self.db_sender = None;
+    }
+    
     /// 체결 실행
     /// 
     /// # Arguments
