@@ -4,7 +4,7 @@ use crate::domains::auth::services::state::AuthState;
 use crate::domains::wallet::services::state::WalletState;
 use crate::domains::swap::services::state::SwapState;
 use crate::domains::cex::services::state::CexState;
-use crate::domains::cex::engine::{Engine, runtime::HighPerformanceEngine};
+use crate::domains::cex::engine::runtime::HighPerformanceEngine;
 use crate::domains::auth::services::JwtService;
 use anyhow::Result;
 use tokio::sync::Mutex;
@@ -40,15 +40,12 @@ impl AppState {
         let swap_state = SwapState::new(db.clone());
         
         // CEX 엔진 생성 (HighPerformanceEngine 사용)
+        // 하나의 인스턴스만 생성하고 모든 곳에서 공유합니다.
         let engine_instance = HighPerformanceEngine::new(db.clone());
         let engine = Arc::new(Mutex::new(engine_instance));
         
-        // 서비스용 엔진 (trait 객체로 변환)
-        // Arc<Mutex<HighPerformanceEngine>>를 Arc<dyn Engine>으로 변환하기 위해
-        // 엔진을 다시 생성하거나, wrapper를 사용
-        // 일단 간단하게: 엔진을 두 번 생성 (나중에 최적화 가능)
-        let engine_for_service: Arc<dyn Engine> = Arc::new(HighPerformanceEngine::new(db.clone()));
-        let cex_state = CexState::new(db.clone(), engine_for_service);
+        // 서비스에도 같은 엔진 인스턴스 전달 (Wrapper 불필요)
+        let cex_state = CexState::new(db.clone(), engine.clone());
         
         // 3. AppState 조합
         Ok(Self {

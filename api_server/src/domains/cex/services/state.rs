@@ -3,13 +3,13 @@
 use std::sync::Arc;
 use crate::shared::database::Database;
 use crate::domains::cex::services::{BalanceService, FeeService, OrderService, TradeService};
-use crate::domains::cex::engine::Engine;
+use crate::domains::cex::engine::runtime::HighPerformanceEngine;
 
 /// CEX domain state
 /// CEX 도메인에서 필요한 서비스들을 포함하는 상태
 #[derive(Clone)]
 pub struct CexState {
-    pub engine: Arc<dyn Engine>,
+    pub engine: Arc<tokio::sync::Mutex<HighPerformanceEngine>>,
     pub balance_service: BalanceService,
     pub fee_service: FeeService,
     pub order_service: OrderService,
@@ -22,8 +22,8 @@ impl CexState {
     /// 
     /// # Arguments
     /// * `db` - 데이터베이스 연결
-    /// * `engine` - 체결 엔진 (trait 객체)
-    pub fn new(db: Database, engine: Arc<dyn Engine>) -> Self {
+    /// * `engine` - 체결 엔진 (구체 타입 직접 사용)
+    pub fn new(db: Database, engine: Arc<tokio::sync::Mutex<HighPerformanceEngine>>) -> Self {
         Self {
             engine: engine.clone(),
             balance_service: BalanceService::new(db.clone()),

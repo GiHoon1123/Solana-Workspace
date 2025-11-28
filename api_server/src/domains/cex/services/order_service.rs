@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::shared::database::{Database, OrderRepository};
 use crate::domains::cex::models::order::{Order, CreateOrderRequest};
-use crate::domains::cex::engine::{Engine, TradingPair, OrderEntry, entry_to_order};
+use crate::domains::cex::engine::{Engine, TradingPair, OrderEntry, entry_to_order, runtime::HighPerformanceEngine};
 use anyhow::{Context, Result, bail};
 use rust_decimal::Decimal;
 use chrono::Utc;
@@ -43,13 +43,12 @@ pub struct OrderService {
     /// Database connection
     db: Database,
     
-    /// 체결 엔진 (trait 객체)
-    /// Matching engine (trait object)
+    /// 체결 엔진 (구체 타입 직접 사용)
+    /// Matching engine (concrete type)
     /// 
-    /// Arc<dyn Engine>를 사용하여 구체적 구현과 분리
-    /// - 나중에 SimpleEngine, HighPerfEngine 등으로 교체 가능
-    /// - Mock 엔진으로 테스트 가능
-    engine: Arc<dyn Engine>,
+    /// 엔진은 하나만 존재하므로 구체 타입을 직접 사용합니다.
+    /// Wrapper 없이 동일한 인스턴스를 공유합니다.
+    engine: Arc<tokio::sync::Mutex<HighPerformanceEngine>>,
 }
 
 impl OrderService {
@@ -68,7 +67,7 @@ impl OrderService {
     /// let engine = Arc::new(SimpleEngine::new(...));
     /// let service = OrderService::new(db, engine);
     /// ```
-    pub fn new(db: Database, engine: Arc<dyn Engine>) -> Self {
+    pub fn new(db: Database, engine: Arc<tokio::sync::Mutex<HighPerformanceEngine>>) -> Self {
         Self { db, engine }
     }
 
@@ -149,10 +148,13 @@ impl OrderService {
         // 매수: quote_mint (USDT) 잠금
         // 매도: base_mint (SOL 등) 잠금
         // 엔진의 인메모리 잔고에서 즉시 잠금 (마이크로초)
-        self.engine
-            .lock_balance(user_id, &required_mint, required_amount)
-            .await
-            .context("Failed to lock balance in engine")?;
+        {
+            let engine_guard = self.engine.lock().await;
+            engine_guard
+                .lock_balance(user_id, &required_mint, required_amount)
+                .await
+                .context("Failed to lock balance in engine")?;
+        }
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 5. 엔진에 주문 즉시 제출 (블로킹 없음!)
@@ -174,11 +176,13 @@ impl OrderService {
         
         // 엔진에 제출 (즉시 매칭 시도, 마이크로초 단위)
         // 엔진이 내부적으로 WAL 기록 + DB 동기화 처리
-        // Service는 엔진의 구현 디테일을 모름 (Dependency Inversion)
-        let _matches = self.engine
-            .submit_order(order_entry.clone())
-            .await
-            .context("Failed to submit order to engine")?;
+        let _matches = {
+            let engine_guard = self.engine.lock().await;
+            engine_guard
+                .submit_order(order_entry.clone())
+                .await
+                .context("Failed to submit order to engine")?
+        };
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 6. Order 객체 반환
@@ -278,10 +282,13 @@ impl OrderService {
             order.quote_mint.clone(),
         );
 
-        let _cancelled_entry = self.engine
-            .cancel_order(order_id, user_id, &trading_pair)
-            .await
-            .context("Failed to cancel order in engine")?;
+        let _cancelled_entry = {
+            let engine_guard = self.engine.lock().await;
+            engine_guard
+                .cancel_order(order_id, user_id, &trading_pair)
+                .await
+                .context("Failed to cancel order in engine")?
+        };
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 5. DB에서 주문 상태 업데이트
@@ -393,10 +400,13 @@ impl OrderService {
         );
 
         // 엔진에서 오더북 조회
-        let (buy_entries, sell_entries) = self.engine
-            .get_orderbook(&trading_pair, depth)
-            .await
-            .context("Failed to get orderbook from engine")?;
+        let (buy_entries, sell_entries) = {
+            let engine_guard = self.engine.lock().await;
+            engine_guard
+                .get_orderbook(&trading_pair, depth)
+                .await
+                .context("Failed to get orderbook from engine")?
+        };
 
         // OrderEntry → Order 변환
         let buy_orders: Vec<Order> = buy_entries
@@ -498,10 +508,13 @@ impl OrderService {
         required_amount: Decimal,
     ) -> Result<()> {
         // 엔진에서 잔고 조회
-        let (available, _locked) = self.engine
-            .get_balance(user_id, mint)
-            .await
-            .context("Failed to get balance from engine")?;
+        let (available, _locked) = {
+            let engine_guard = self.engine.lock().await;
+            engine_guard
+                .get_balance(user_id, mint)
+                .await
+                .context("Failed to get balance from engine")?
+        };
 
         // 잔고 부족 체크
         if available < required_amount {

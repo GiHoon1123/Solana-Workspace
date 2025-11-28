@@ -640,7 +640,20 @@ impl Engine for HighPerformanceEngine {
             .map_err(|e| anyhow::anyhow!("Failed to receive response: {}", e))?
     }
     
-    /// 엔진 시작
+    /// 엔진 시작 (trait 구현)
+    async fn start(&mut self) -> Result<()> {
+        self.start_impl().await
+    }
+    
+    /// 엔진 정지 (trait 구현)
+    async fn stop(&mut self) -> Result<()> {
+        self.stop_impl().await
+    }
+}
+
+// HighPerformanceEngine의 pub 메서드 (main.rs에서 직접 호출 가능)
+impl HighPerformanceEngine {
+    /// 엔진 시작 (pub 메서드 - main.rs에서 직접 호출 가능)
     /// 
     /// # 처리 과정
     /// 1. DB에서 잔고/주문 로드
@@ -651,11 +664,11 @@ impl Engine for HighPerformanceEngine {
     /// # Note
     /// `&mut self`를 사용하여 필드를 직접 수정합니다.
     /// 서버 시작 시 한 번만 호출됩니다.
-    async fn start(&mut self) -> Result<()> {
+    pub async fn start(&mut self) -> Result<()> {
         self.start_impl().await
     }
     
-    /// 엔진 정지
+    /// 엔진 정지 (pub 메서드 - main.rs에서 직접 호출 가능)
     /// 
     /// # 처리 과정
     /// 1. 실행 플래그 해제
@@ -665,7 +678,7 @@ impl Engine for HighPerformanceEngine {
     /// # Note
     /// `&mut self`를 사용하여 필드를 직접 수정합니다.
     /// 서버 종료 시 한 번만 호출됩니다.
-    async fn stop(&mut self) -> Result<()> {
+    pub async fn stop(&mut self) -> Result<()> {
         self.stop_impl().await
     }
 }
