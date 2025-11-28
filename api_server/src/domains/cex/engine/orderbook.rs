@@ -224,8 +224,10 @@ mod tests {
             quote_mint: "USDT".to_string(),
             price: Some(Decimal::from_f64_retain(price).unwrap()),
             amount: Decimal::from_f64_retain(amount).unwrap(),
+            quote_amount: None,
             filled_amount: Decimal::ZERO,
             remaining_amount: Decimal::from_f64_retain(amount).unwrap(),
+            remaining_quote_amount: None,
             created_at: Utc::now(),
         }
     }
