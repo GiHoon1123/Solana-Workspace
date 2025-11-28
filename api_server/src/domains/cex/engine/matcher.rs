@@ -129,7 +129,18 @@ impl Matcher {
             };
             
             // FIFO: 가장 오래된 주문부터 매칭
+            let initial_queue_len = sell_orders.len(); // 초기 큐 길이
+            let mut processed_count = 0; // 처리한 주문 수 (무한 루프 방지)
+            
             while let Some(mut sell_order) = sell_orders.pop_front() {
+                processed_count += 1;
+                
+                // 무한 루프 방지: 초기 큐 길이만큼 처리했는데도 매칭이 안 되면 종료
+                if processed_count > initial_queue_len * 2 {
+                    // 모든 주문이 같은 user_id일 가능성이 높음
+                    break;
+                }
+                
                 // Self-Trade 금지: 같은 유저의 주문은 매칭하지 않음
                 if buy_order.user_id == sell_order.user_id {
                     // 같은 유저의 주문이므로 다시 큐에 추가하고 다음 주문으로
@@ -269,7 +280,18 @@ impl Matcher {
             };
             
             // FIFO: 가장 오래된 주문부터 매칭
+            let initial_queue_len = buy_orders.len(); // 초기 큐 길이
+            let mut processed_count = 0; // 처리한 주문 수 (무한 루프 방지)
+            
             while let Some(mut buy_order) = buy_orders.pop_front() {
+                processed_count += 1;
+                
+                // 무한 루프 방지: 초기 큐 길이만큼 처리했는데도 매칭이 안 되면 종료
+                if processed_count > initial_queue_len * 2 {
+                    // 모든 주문이 같은 user_id일 가능성이 높음
+                    break;
+                }
+                
                 // Self-Trade 금지: 같은 유저의 주문은 매칭하지 않음
                 if buy_order.user_id == sell_order.user_id {
                     // 같은 유저의 주문이므로 다시 큐에 추가하고 다음 주문으로
@@ -516,5 +538,83 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].sell_order_id, 1); // 가장 먼저 온 주문
         assert_eq!(matches[0].seller_id, 100);
+    }
+    
+    /// 테스트: Self-Trade 방지 (매수)
+    /// 
+    /// 같은 user_id의 매수/매도 주문이 매칭되지 않는지 확인합니다.
+    #[test]
+    fn test_self_trade_prevention_buy() {
+        let pair = TradingPair::new("SOL".to_string(), "USDT".to_string());
+        let mut orderbook = OrderBook::new(pair);
+        let matcher = Matcher::new();
+        
+        let user_id = 100;
+        
+        // 같은 유저의 매도 주문 추가
+        orderbook.add_order(create_test_order(1, user_id, "sell", "limit", Some(100.0), 1.0));
+        
+        // 같은 유저의 매수 주문
+        let mut buy_order = create_test_order(2, user_id, "buy", "limit", Some(100.0), 1.0);
+        
+        // 매칭 실행
+        let matches = matcher.match_order(&mut buy_order, &mut orderbook);
+        
+        // Self-Trade 방지: 매칭되지 않아야 함
+        assert_eq!(matches.len(), 0);
+        
+        // 매수 주문이 오더북에 남아있어야 함 (매칭되지 않았으므로)
+        // 실제로는 매칭 실패 시 오더북에 추가되지 않지만, 여기서는 매칭 결과만 확인
+    }
+    
+    /// 테스트: Self-Trade 방지 (매도)
+    /// 
+    /// 같은 user_id의 매도/매수 주문이 매칭되지 않는지 확인합니다.
+    #[test]
+    fn test_self_trade_prevention_sell() {
+        let pair = TradingPair::new("SOL".to_string(), "USDT".to_string());
+        let mut orderbook = OrderBook::new(pair);
+        let matcher = Matcher::new();
+        
+        let user_id = 100;
+        
+        // 같은 유저의 매수 주문 추가
+        orderbook.add_order(create_test_order(1, user_id, "buy", "limit", Some(100.0), 1.0));
+        
+        // 같은 유저의 매도 주문
+        let mut sell_order = create_test_order(2, user_id, "sell", "limit", Some(100.0), 1.0);
+        
+        // 매칭 실행
+        let matches = matcher.match_order(&mut sell_order, &mut orderbook);
+        
+        // Self-Trade 방지: 매칭되지 않아야 함
+        assert_eq!(matches.len(), 0);
+    }
+    
+    /// 테스트: 가격 우선순위 매칭
+    /// 
+    /// 더 좋은 가격의 주문이 먼저 매칭되는지 확인합니다.
+    #[test]
+    fn test_price_priority_matching() {
+        let pair = TradingPair::new("SOL".to_string(), "USDT".to_string());
+        let mut orderbook = OrderBook::new(pair);
+        let matcher = Matcher::new();
+        
+        // 매도 호가: 100, 101, 102 (낮은 가격 우선)
+        orderbook.add_order(create_test_order(1, 100, "sell", "limit", Some(102.0), 1.0));
+        orderbook.add_order(create_test_order(2, 101, "sell", "limit", Some(101.0), 1.0));
+        orderbook.add_order(create_test_order(3, 102, "sell", "limit", Some(100.0), 1.0));
+        
+        // 매수 주문: 3 SOL
+        let mut buy_order = create_test_order(4, 200, "buy", "limit", Some(105.0), 3.0);
+        
+        // 매칭 실행
+        let matches = matcher.match_order(&mut buy_order, &mut orderbook);
+        
+        // 가격 우선순위: 100 → 101 → 102 순으로 매칭되어야 함
+        assert_eq!(matches.len(), 3);
+        assert_eq!(matches[0].price, Decimal::from_f64_retain(100.0).unwrap()); // 가장 낮은 가격 먼저
+        assert_eq!(matches[1].price, Decimal::from_f64_retain(101.0).unwrap());
+        assert_eq!(matches[2].price, Decimal::from_f64_retain(102.0).unwrap());
     }
 }
