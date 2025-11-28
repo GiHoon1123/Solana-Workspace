@@ -359,8 +359,10 @@ pub fn order_to_entry(order: &crate::domains::cex::models::order::Order) -> Orde
         quote_mint: order.quote_mint.clone(),
         price: order.price,
         amount: order.amount,
+        quote_amount: None, // DB에서 로드한 주문은 수량 기반으로 가정
         filled_amount: order.filled_amount,
         remaining_amount: order.amount - order.filled_amount,
+        remaining_quote_amount: None,
         created_at: order.created_at,
     }
 }

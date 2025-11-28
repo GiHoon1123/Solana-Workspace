@@ -127,8 +127,29 @@ pub struct CreateOrderRequest {
     /// 주문 수량 (기준 자산 기준)
     /// Supports decimal values (e.g., 0.1 SOL, 0.0001 SOL)
     /// 소수점 값 지원 (예: 0.1 SOL, 0.0001 SOL)
-    #[schema(value_type = String, example = "1.0")]
-    pub amount: Decimal,
+    /// 
+    /// Note: For market buy orders, use `quote_amount` instead.
+    /// 시장가 매수 주문의 경우 `quote_amount`를 사용하세요.
+    #[schema(value_type = Option<String>, example = "1.0")]
+    pub amount: Option<Decimal>,
+
+    /// Quote amount (for market buy orders only)
+    /// 금액 기반 주문 (시장가 매수만)
+    /// 
+    /// Example: "1000 USDT worth of SOL"
+    /// 예: "1000 USDT어치 SOL 사기"
+    /// 
+    /// Rules:
+    /// - Market buy: `quote_amount` is required (amount-based market buy is not supported)
+    /// - Limit buy: `amount` is required
+    /// - All sell orders: `amount` is required
+    /// 
+    /// 규칙:
+    /// - 시장가 매수: `quote_amount` 필수 (수량 기반 시장가 매수는 지원하지 않음)
+    /// - 지정가 매수: `amount` 필수
+    /// - 모든 매도: `amount` 필수
+    #[schema(value_type = Option<String>, example = "1000.0")]
+    pub quote_amount: Option<Decimal>,
 }
 
 // =====================================================

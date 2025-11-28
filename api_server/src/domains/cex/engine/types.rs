@@ -132,15 +132,36 @@ pub struct OrderEntry {
     
     /// 주문 수량 (base_mint 기준)
     /// Order amount (in base_mint)
+    /// 
+    /// Note: For market buy orders with quote_amount, this is calculated from quote_amount / price
+    /// 시장가 매수 주문의 경우 (quote_amount 기반), 이 값은 quote_amount / price로 계산됨
     pub amount: Decimal,
     
-    /// 체결된 수량
-    /// Filled amount
+    /// 금액 기반 주문 (시장가 매수만)
+    /// Quote amount (for market buy orders only)
+    /// 
+    /// Example: "1000 USDT worth of SOL"
+    /// 예: "1000 USDT어치 SOL 사기"
+    /// 
+    /// If Some, this order is a market buy with quote amount.
+    /// If None, this order uses amount (quantity-based).
+    /// Some이면 시장가 매수 금액 기반, None이면 수량 기반
+    pub quote_amount: Option<Decimal>,
+    
+    /// 체결된 수량 (base_mint 기준)
+    /// Filled amount (in base_mint)
     pub filled_amount: Decimal,
     
     /// 남은 수량 (amount - filled_amount)
     /// Remaining amount
     pub remaining_amount: Decimal,
+    
+    /// 남은 금액 (quote_amount 기반 주문의 경우)
+    /// Remaining quote amount (for quote_amount-based orders)
+    /// 
+    /// For market buy orders with quote_amount, this tracks remaining USDT to spend.
+    /// 시장가 매수 주문(quote_amount 기반)의 경우, 남은 USDT 금액을 추적
+    pub remaining_quote_amount: Option<Decimal>,
     
     /// 주문 생성 시간 (Time Priority에 사용)
     /// Order creation time (used for Time Priority)

@@ -100,23 +100,33 @@ impl CoreConfig {
     ///     log::warn!("Failed to set core affinity to {}: {}", core, e);
     /// }
     /// ```
-    /// 코어 고정 설정 (활성화)
+    /// 코어 고정 설정 (Linux 전용)
     /// 
     /// # Arguments
     /// * `core_id` - 고정할 코어 번호 (None이면 고정 안 함)
     /// 
     /// # Note
-    /// 코어 고정 실패해도 경고만 출력하고 계속 진행
-    /// (권한 없거나 코어가 없을 수 있음)
+    /// - Linux에서만 동작 (macOS/Windows에서는 무시)
+    /// - 코어 고정 실패해도 경고만 출력하고 계속 진행
+    /// - 권한 없거나 코어가 없을 수 있음
     pub fn set_core(core_id: Option<usize>) {
-        if let Some(core) = core_id {
-            use core_affinity::{set_for_current, CoreId};
-            if set_for_current(CoreId { id: core }) {
-                eprintln!("✅ Core affinity set to core {}", core);
-            } else {
-                eprintln!("⚠️  Failed to set core affinity to {}", core);
-                eprintln!("   This is normal if running without proper permissions");
+        #[cfg(target_os = "linux")]
+        {
+            if let Some(core) = core_id {
+                use core_affinity::{set_for_current, CoreId};
+                if set_for_current(CoreId { id: core }) {
+                    eprintln!("Core affinity set to core {}", core);
+                } else {
+                    eprintln!("Failed to set core affinity to {}", core);
+                    eprintln!("   This is normal if running without proper permissions");
+                }
             }
+        }
+        
+        #[cfg(not(target_os = "linux"))]
+        {
+            // macOS/Windows에서는 코어 고정 지원 안 함 (조용히 무시)
+            let _ = core_id;
         }
     }
     
@@ -148,7 +158,8 @@ impl CoreConfig {
         
         #[cfg(not(target_os = "linux"))]
         {
-            eprintln!("⚠️  Real-time scheduling is only available on Linux");
+            // macOS/Windows에서는 실시간 스케줄링 지원 안 함 (조용히 무시)
+            let _ = priority;
         }
     }
 }

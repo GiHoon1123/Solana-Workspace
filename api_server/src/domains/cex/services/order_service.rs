@@ -160,6 +160,20 @@ impl OrderService {
         // 5. 엔진에 주문 즉시 제출 (블로킹 없음!)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // OrderEntry 생성 (DB 주문 객체 없이)
+        // 
+        // 시장가 매수: 금액 기반만 지원 (quote_amount 필수, amount는 매칭 시 계산됨)
+        // 지정가 매수/모든 매도: 수량 기반 (amount 필수)
+        let (amount, remaining_amount, quote_amount, remaining_quote_amount) = 
+            if request.order_type == "buy" && request.order_side == "market" {
+                // 시장가 매수 금액 기반: amount는 0으로 시작 (매칭 시 계산됨)
+                let quote_amt = request.quote_amount.unwrap();
+                (Decimal::ZERO, Decimal::ZERO, Some(quote_amt), Some(quote_amt))
+            } else {
+                // 수량 기반 주문 (지정가 매수, 모든 매도)
+                let amt = request.amount.unwrap();
+                (amt, amt, None, None)
+            };
+        
         let order_entry = OrderEntry {
             id: order_id,
             user_id,
@@ -168,9 +182,11 @@ impl OrderService {
             base_mint: request.base_mint.clone(),
             quote_mint: quote_mint.clone(),
             price: request.price,
-            amount: request.amount,
+            amount,
+            quote_amount,
             filled_amount: Decimal::ZERO,
-            remaining_amount: request.amount,
+            remaining_amount,
+            remaining_quote_amount,
             created_at: Utc::now(),
         };
         
@@ -189,6 +205,15 @@ impl OrderService {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // DB 저장은 엔진의 백그라운드 워커가 처리
         // (WAL → DB 동기화)
+        // 
+        // Note: 시장가 매수 금액 기반의 경우, amount는 매칭 후 계산됨
+        // 일단 0으로 설정 (엔진에서 매칭 후 업데이트)
+        let order_amount = if request.order_type == "buy" && request.order_side == "market" && request.quote_amount.is_some() {
+            Decimal::ZERO // 매칭 후 계산됨
+        } else {
+            request.amount.unwrap()
+        };
+        
         let order = Order {
             id: order_id,
             user_id,
@@ -197,7 +222,7 @@ impl OrderService {
             base_mint: request.base_mint,
             quote_mint,
             price: request.price,
-            amount: request.amount,
+            amount: order_amount,
             filled_amount: Decimal::ZERO,
             status: "pending".to_string(),
             created_at: Utc::now(),
@@ -449,9 +474,49 @@ impl OrderService {
             bail!("Market order cannot have price");
         }
 
-        // 수량은 양수여야 함
-        if request.amount <= Decimal::ZERO {
-            bail!("Amount must be positive");
+        // 매도 주문: amount 필수
+        if request.order_type == "sell" {
+            if request.amount.is_none() {
+                bail!("Sell orders must have amount");
+            }
+            if let Some(amount) = request.amount {
+                if amount <= Decimal::ZERO {
+                    bail!("Amount must be positive");
+                }
+            }
+            if request.quote_amount.is_some() {
+                bail!("Sell orders cannot use quote_amount");
+            }
+        }
+
+        // 지정가 매수: amount + price 필수
+        if request.order_type == "buy" && request.order_side == "limit" {
+            if request.amount.is_none() {
+                bail!("Limit buy orders must have amount");
+            }
+            if let Some(amount) = request.amount {
+                if amount <= Decimal::ZERO {
+                    bail!("Amount must be positive");
+                }
+            }
+            if request.quote_amount.is_some() {
+                bail!("Limit buy orders cannot use quote_amount");
+            }
+        }
+
+        // 시장가 매수: quote_amount만 필수 (금액 기반만 지원)
+        if request.order_type == "buy" && request.order_side == "market" {
+            if request.quote_amount.is_none() {
+                bail!("Market buy orders must have quote_amount (amount-based market buy is not supported)");
+            }
+            if request.amount.is_some() {
+                bail!("Market buy orders cannot use amount, use quote_amount instead");
+            }
+            if let Some(quote_amount) = request.quote_amount {
+                if quote_amount <= Decimal::ZERO {
+                    bail!("Quote amount must be positive");
+                }
+            }
         }
 
         // 가격은 양수여야 함 (지정가인 경우)
@@ -477,23 +542,24 @@ impl OrderService {
     ) -> Result<(String, Decimal)> {
         match request.order_type.as_str() {
             "buy" => {
-                // 매수: USDT 필요
-                let price = if request.order_side == "market" {
-                    // 시장가: 최악의 가격 가정 (여유있게)
-                    // TODO: 엔진에서 최저 매도가 조회하여 계산
-                    // 일단 임시로 매우 큰 값 (나중에 개선)
-                    Decimal::MAX
-                } else {
-                    request.price.unwrap()
-                };
-                
-                let required_amount = price * request.amount;
                 let quote_mint = request.quote_mint.clone().unwrap_or_else(|| "USDT".to_string());
-                Ok((quote_mint, required_amount))
+                
+                if request.order_side == "market" {
+                    // 시장가 매수: 금액 기반만 지원 (quote_amount 필수)
+                    let quote_amount = request.quote_amount.unwrap();
+                    Ok((quote_mint, quote_amount))
+                } else {
+                    // 지정가 매수: price * amount
+                    let price = request.price.unwrap();
+                    let amount = request.amount.unwrap();
+                    let required_amount = price * amount;
+                    Ok((quote_mint, required_amount))
+                }
             }
             "sell" => {
-                // 매도: base_mint 필요
-                Ok((request.base_mint.clone(), request.amount))
+                // 매도: base_mint 필요 (항상 수량 기반)
+                let amount = request.amount.unwrap();
+                Ok((request.base_mint.clone(), amount))
             }
             _ => bail!("Invalid order_type"),
         }

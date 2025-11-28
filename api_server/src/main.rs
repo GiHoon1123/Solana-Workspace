@@ -151,7 +151,7 @@ async fn main() {
             .expect("Failed to start engine");
     }
     
-    println!("✅ Engine started successfully");
+    println!("Engine started successfully");
 
     // CORS 설정
     let cors = CorsLayer::new()

@@ -94,8 +94,17 @@ impl Matcher {
         
         // 매도 호가 순회 (낮은 가격부터)
         loop {
-            // 매수 주문이 완전히 체결되었으면 종료
-            if buy_order.remaining_amount == Decimal::ZERO {
+            // 시장가 매수 금액 기반: remaining_quote_amount 확인
+            // 수량 기반: remaining_amount 확인
+            let is_fully_filled = if let Some(remaining_quote) = buy_order.remaining_quote_amount {
+                // 금액 기반: 남은 금액이 0이면 완전 체결
+                remaining_quote <= Decimal::ZERO
+            } else {
+                // 수량 기반: 남은 수량이 0이면 완전 체결
+                buy_order.remaining_amount == Decimal::ZERO
+            };
+            
+            if is_fully_filled {
                 break;
             }
             
@@ -121,8 +130,19 @@ impl Matcher {
             
             // FIFO: 가장 오래된 주문부터 매칭
             while let Some(mut sell_order) = sell_orders.pop_front() {
-                // 매칭 수량 계산 (둘 중 작은 것)
-                let match_amount = buy_order.remaining_amount.min(sell_order.remaining_amount);
+                // 매칭 수량 계산
+                let match_amount = if let Some(remaining_quote) = buy_order.remaining_quote_amount {
+                    // 시장가 매수 금액 기반: remaining_quote_amount / price로 수량 계산
+                    let max_amount_from_quote = remaining_quote / current_ask;
+                    max_amount_from_quote.min(sell_order.remaining_amount)
+                } else {
+                    // 수량 기반: 둘 중 작은 것
+                    buy_order.remaining_amount.min(sell_order.remaining_amount)
+                };
+                
+                if match_amount <= Decimal::ZERO {
+                    break; // 더 이상 매칭 불가
+                }
                 
                 // 체결 가격 (Taker가 받아들이는 가격 = 매도 가격)
                 let match_price = current_ask;
@@ -139,9 +159,24 @@ impl Matcher {
                     quote_mint: buy_order.quote_mint.clone(),
                 };
                 
-                // 주문 수량 차감
+                // 주문 수량/금액 차감
+                if let Some(ref mut remaining_quote) = buy_order.remaining_quote_amount {
+                    // 시장가 매수 금액 기반: quote_amount 차감
+                    let quote_used = match_amount * match_price;
+                    *remaining_quote -= quote_used;
+                    
+                    // amount 업데이트 (매칭된 수량 누적)
+                    // 초기 amount는 0이었고, 매칭될 때마다 증가
+                    buy_order.amount += match_amount;
+                    buy_order.filled_amount += match_amount;
+                    // remaining_amount = amount - filled_amount (자동 계산)
+                    buy_order.remaining_amount = buy_order.amount - buy_order.filled_amount;
+                } else {
+                    // 수량 기반: amount 차감
                 buy_order.remaining_amount -= match_amount;
                 buy_order.filled_amount += match_amount;
+                }
+                
                 sell_order.remaining_amount -= match_amount;
                 sell_order.filled_amount += match_amount;
                 
@@ -153,8 +188,14 @@ impl Matcher {
                 // 매칭 결과 저장
                 matches.push(match_result);
                 
-                // 매수 주문이 완전히 체결되었으면 종료
-                if buy_order.remaining_amount == Decimal::ZERO {
+                // 매수 주문이 완전히 체결되었는지 확인
+                let is_fully_filled = if let Some(remaining_quote) = buy_order.remaining_quote_amount {
+                    remaining_quote <= Decimal::ZERO
+                } else {
+                    buy_order.remaining_amount == Decimal::ZERO
+                };
+                
+                if is_fully_filled {
                     break;
                 }
             }
