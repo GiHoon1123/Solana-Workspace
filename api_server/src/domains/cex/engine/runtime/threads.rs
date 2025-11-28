@@ -73,8 +73,8 @@ use super::config::CoreConfig;
 /// - TPS: 50,000+ orders/sec
 pub fn engine_thread_loop(
     order_rx: Receiver<OrderCommand>,
-    wal_tx: crossbeam::channel::Sender<WalEntry>,
-    db_tx: crossbeam::channel::Sender<super::db_commands::DbCommand>,
+    wal_tx: Option<crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     orderbooks: Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
     matcher: Arc<Matcher>,
     executor: Arc<Mutex<Executor>>,
@@ -113,8 +113,8 @@ pub fn engine_thread_loop(
                         handle_submit_order(
                             order,
                             response,
-                            &wal_tx,
-                            &db_tx,
+                            wal_tx.as_ref(),
+                            db_tx.as_ref(),
                             &orderbooks,
                             &matcher,
                             &executor,
@@ -126,7 +126,7 @@ pub fn engine_thread_loop(
                             user_id,
                             trading_pair,
                             response,
-                            &wal_tx,
+                            wal_tx.as_ref(),
                             &orderbooks,
                             &executor,
                         );
@@ -153,7 +153,7 @@ pub fn engine_thread_loop(
                             mint,
                             amount,
                             response,
-                            &wal_tx,
+                            wal_tx.as_ref(),
                             &executor,
                         );
                     }
@@ -163,7 +163,7 @@ pub fn engine_thread_loop(
                             mint,
                             amount,
                             response,
-                            &wal_tx,
+                            wal_tx.as_ref(),
                             &executor,
                         );
                     }
@@ -190,14 +190,26 @@ pub fn engine_thread_loop(
 /// 4. 체결된 경우 Executor로 처리
 /// 5. MatchResult 목록을 response로 전송
 fn handle_submit_order(
-    mut order: OrderEntry,
+    order: OrderEntry,
     response: tokio::sync::oneshot::Sender<Result<Vec<MatchResult>>>,
-    wal_tx: &crossbeam::channel::Sender<WalEntry>,
-    db_tx: &crossbeam::channel::Sender<super::db_commands::DbCommand>,
+    wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     orderbooks: &Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
     matcher: &Arc<Matcher>,
     executor: &Arc<Mutex<Executor>>,
 ) {
+    let result = process_submit_order(order, wal_tx, db_tx, orderbooks, matcher, executor);
+    let _ = response.send(result);
+}
+
+pub(crate) fn process_submit_order(
+    mut order: OrderEntry,
+    wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
+    orderbooks: &Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
+    matcher: &Arc<Matcher>,
+    executor: &Arc<Mutex<Executor>>,
+) -> Result<Vec<MatchResult>> {
     // 1. TradingPair 찾기
     let pair = TradingPair::new(order.base_mint.clone(), order.quote_mint.clone());
     
@@ -234,37 +246,40 @@ fn handle_submit_order(
                     order.user_id, lock_mint, lock_amount, e
                 );
             }
-            let _ = response.send(Err(anyhow::anyhow!("Failed to lock balance: {}", e)));
-            return;
+            return Err(anyhow::anyhow!("Failed to lock balance: {}", e));
         }
     }
     
     // 3. WAL 메시지 발행 (OrderCreated) - 잔고 잠금 후!
-    let wal_entry = WalEntry::OrderCreated {
-        order_id: order.id,
-        user_id: order.user_id,
-        order_type: order.order_type.clone(),
-        base_mint: order.base_mint.clone(),
-        quote_mint: order.quote_mint.clone(),
-        price: order.price.map(|p| p.to_string()),
-        amount: order.amount.to_string(),
-        timestamp: order.created_at.timestamp_millis(),
-    };
-    let _ = wal_tx.send(wal_entry);
+    if let Some(tx) = wal_tx {
+        let wal_entry = WalEntry::OrderCreated {
+            order_id: order.id,
+            user_id: order.user_id,
+            order_type: order.order_type.clone(),
+            base_mint: order.base_mint.clone(),
+            quote_mint: order.quote_mint.clone(),
+            price: order.price.map(|p| p.to_string()),
+            amount: order.amount.to_string(),
+            timestamp: order.created_at.timestamp_millis(),
+        };
+        let _ = tx.send(wal_entry);
+    }
     
     // 3-1. 주문을 DB에 저장 (배치로 처리됨, trade insert 전에 필요 - 외래키 제약)
-    let db_cmd = super::db_commands::DbCommand::InsertOrder {
-        order_id: order.id,
-        user_id: order.user_id,
-        order_type: order.order_type.clone(),
-        order_side: order.order_side.clone(),
-        base_mint: order.base_mint.clone(),
-        quote_mint: order.quote_mint.clone(),
-        price: order.price,
-        amount: order.amount,
-        created_at: order.created_at,
-    };
-    let _ = db_tx.send(db_cmd); // Non-blocking, 배치로 처리됨
+    if let Some(tx) = db_tx {
+        let db_cmd = super::db_commands::DbCommand::InsertOrder {
+            order_id: order.id,
+            user_id: order.user_id,
+            order_type: order.order_type.clone(),
+            order_side: order.order_side.clone(),
+            base_mint: order.base_mint.clone(),
+            quote_mint: order.quote_mint.clone(),
+            price: order.price,
+            amount: order.amount,
+            created_at: order.created_at,
+        };
+        let _ = tx.send(db_cmd); // Non-blocking, 배치로 처리됨
+    }
     
     // 4. 시장가 주문 여부 및 초기 잔고 잠금 정보 저장 (order 이동 전)
     let is_market_order = order.order_side == "market";
@@ -352,8 +367,7 @@ fn handle_submit_order(
             }
         }
         
-        // 에러 반환
-        let _ = response.send(Err(anyhow::anyhow!(
+        return Err(anyhow::anyhow!(
             "Market order partially filled or not filled at all. Matches: {}, Remaining: {}",
             matches.len(),
             if order_after_match.order_type == "buy" {
@@ -361,8 +375,7 @@ fn handle_submit_order(
             } else {
                 order_after_match.remaining_amount
             }
-        )));
-        return;
+        ));
     }
     
     // 시장가 주문이 매칭되지 않았으면 (matches가 비어있음) 잔고 잠금 해제 및 에러 반환
@@ -391,11 +404,9 @@ fn handle_submit_order(
             }
         }
         
-        // 에러 반환
-        let _ = response.send(Err(anyhow::anyhow!(
+        return Err(anyhow::anyhow!(
             "Market order cannot be filled: no matching orders in orderbook"
-        )));
-        return;
+        ));
     }
     
     // 8. 체결 처리 (정상 케이스: 지정가 주문 또는 완전히 체결된 시장가 주문)
@@ -409,8 +420,7 @@ fn handle_submit_order(
         }
     }
     
-    // 9. 결과 반환
-    let _ = response.send(Ok(matches));
+    Ok(matches)
 }
 
 /// CancelOrder 명령 처리
@@ -427,7 +437,7 @@ fn handle_cancel_order(
     user_id: u64,
     trading_pair: TradingPair,
     response: tokio::sync::oneshot::Sender<Result<OrderEntry>>,
-    wal_tx: &crossbeam::channel::Sender<WalEntry>,
+    wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
     orderbooks: &Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
     executor: &Arc<Mutex<Executor>>,
 ) {
@@ -523,12 +533,14 @@ fn handle_cancel_order(
     };
     
     // 3. WAL 메시지 발행 (OrderCancelled)
-    let wal_entry = WalEntry::OrderCancelled {
-        order_id,
-        user_id,
-        timestamp: chrono::Utc::now().timestamp_millis(),
-    };
-    let _ = wal_tx.send(wal_entry);
+    if let Some(tx) = wal_tx {
+        let wal_entry = WalEntry::OrderCancelled {
+            order_id,
+            user_id,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        };
+        let _ = tx.send(wal_entry);
+    }
     
     // 4. 잔고 잠금 해제 (remaining_amount만큼)
     let order_type_str = order_type.as_deref().unwrap_or("buy");
@@ -653,19 +665,21 @@ fn handle_lock_balance(
     mint: String,
     amount: rust_decimal::Decimal,
     response: tokio::sync::oneshot::Sender<Result<()>>,
-    wal_tx: &crossbeam::channel::Sender<WalEntry>,
+    wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
     executor: &Arc<Mutex<Executor>>,
 ) {
     let mut executor = executor.lock();
     
     // WAL 메시지 발행
-    let wal_entry = WalEntry::BalanceLocked {
-        user_id,
-        mint: mint.clone(),
-        amount: amount.to_string(),
-        timestamp: chrono::Utc::now().timestamp_millis(),
-    };
-    let _ = wal_tx.send(wal_entry);
+    if let Some(tx) = wal_tx {
+        let wal_entry = WalEntry::BalanceLocked {
+            user_id,
+            mint: mint.clone(),
+            amount: amount.to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        };
+        let _ = tx.send(wal_entry);
+    }
     
     // 잔고 잠금
     match executor.lock_balance_for_order(0, user_id, &mint, amount) {
@@ -684,18 +698,20 @@ fn handle_unlock_balance(
     mint: String,
     amount: rust_decimal::Decimal,
     response: tokio::sync::oneshot::Sender<Result<()>>,
-    wal_tx: &crossbeam::channel::Sender<WalEntry>,
+    wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
     executor: &Arc<Mutex<Executor>>,
 ) {
     let mut executor = executor.lock();
     
     // WAL 메시지 발행
-    let wal_entry = WalEntry::OrderCancelled {
-        order_id: 0,  // TODO: 실제 order_id 전달
-        user_id,
-        timestamp: chrono::Utc::now().timestamp_millis(),
-    };
-    let _ = wal_tx.send(wal_entry);
+    if let Some(tx) = wal_tx {
+        let wal_entry = WalEntry::OrderCancelled {
+            order_id: 0,  // TODO: 실제 order_id 전달
+            user_id,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        };
+        let _ = tx.send(wal_entry);
+    }
     
     // 잔고 잠금 해제
     match executor.unlock_balance_for_cancel(0, user_id, &mint, amount) {
@@ -705,6 +721,52 @@ fn handle_unlock_balance(
         Err(e) => {
             let _ = response.send(Err(e));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use rust_decimal::Decimal;
+
+    fn sample_limit_buy(order_id: u64, user_id: u64) -> OrderEntry {
+        OrderEntry {
+            id: order_id,
+            user_id,
+            order_type: "buy".to_string(),
+            order_side: "limit".to_string(),
+            base_mint: "SOL".to_string(),
+            quote_mint: "USDT".to_string(),
+            price: Some(Decimal::new(100, 0)),
+            amount: Decimal::new(1, 0),
+            quote_amount: None,
+            filled_amount: Decimal::ZERO,
+            remaining_amount: Decimal::new(1, 0),
+            remaining_quote_amount: None,
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn submit_order_without_persistence_channels() {
+        let orderbooks = Arc::new(RwLock::new(HashMap::new()));
+        let matcher = Arc::new(Matcher::new());
+        let executor = Arc::new(Mutex::new(Executor::new_without_wal()));
+
+        {
+            let mut exec = executor.lock();
+            exec.balance_cache_mut()
+                .set_balance(1, "USDT", Decimal::new(10_000, 0), Decimal::ZERO);
+        }
+
+        let order = sample_limit_buy(1, 1);
+        let result =
+            super::process_submit_order(order, None, None, &orderbooks, &matcher, &executor).unwrap();
+        assert!(result.is_empty());
+
+        let books = orderbooks.read();
+        assert_eq!(books.len(), 1);
     }
 }
 

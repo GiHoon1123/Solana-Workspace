@@ -78,14 +78,17 @@ impl Executor {
     /// # Example
     /// ```ignore
     /// let (wal_tx, wal_rx) = crossbeam::channel::bounded(10000);
-    /// let executor = Executor::new(wal_tx);
+    /// let executor = Executor::new(Some(wal_tx), Some(db_tx));
     /// 
     /// // WAL Thread에서 wal_rx로 메시지 수신 & 처리
     /// ```
-    pub fn new(wal_sender: Sender<WalEntry>, db_sender: Option<Sender<DbCommand>>) -> Self {
+    pub fn new(
+        wal_sender: Option<Sender<WalEntry>>,
+        db_sender: Option<Sender<DbCommand>>,
+    ) -> Self {
         Self {
             balance_cache: BalanceCache::new(),
-            wal_sender: Some(wal_sender),
+            wal_sender,
             db_sender,
         }
     }
@@ -95,11 +98,7 @@ impl Executor {
     /// # Note
     /// 테스트에서는 WAL 메시지 발행을 생략
     pub fn new_without_wal() -> Self {
-        Self {
-            balance_cache: BalanceCache::new(),
-            wal_sender: None,
-            db_sender: None,
-        }
+        Self::new(None, None)
     }
     
     /// 채널 Sender 해제 (엔진 종료 시 호출)

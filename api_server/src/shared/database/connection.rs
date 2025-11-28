@@ -43,4 +43,10 @@ impl Database {
         println!("Database migrations completed successfully");
         Ok(())
     }
+
+    /// 벤치마크/테스트용 No-op Database (실제 연결 없음)
+    #[cfg(any(test, feature = "bench"))]
+    pub fn noop(pool: PgPool) -> Self {
+        Self { pool }
+    }
 }

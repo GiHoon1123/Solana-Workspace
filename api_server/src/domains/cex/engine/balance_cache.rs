@@ -234,6 +234,11 @@ impl BalanceCache {
             Balance { available, locked },
         );
     }
+
+    /// 모든 잔고 삭제 (벤치마크/테스트 초기화용)
+    pub fn clear(&mut self) {
+        self.balances.clear();
+    }
 }
 
 #[cfg(test)]

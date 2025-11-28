@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread;
-use anyhow::Result;
+use anyhow::{Result, Context};
 use crossbeam::channel::{Receiver, Sender, bounded};
 use parking_lot::{RwLock, Mutex};
 use tokio::sync::oneshot;
@@ -39,6 +39,26 @@ use crate::domains::cex::engine::Engine;
 use super::commands::OrderCommand;
 use super::config::CoreConfig;
 use super::db_commands::DbCommand;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngineMode {
+    Standard,
+    Bench,
+}
+
+impl EngineMode {
+    fn load_from_db(&self) -> bool {
+        matches!(self, EngineMode::Standard)
+    }
+
+    fn use_wal(&self) -> bool {
+        matches!(self, EngineMode::Standard)
+    }
+
+    fn use_db_writer(&self) -> bool {
+        matches!(self, EngineMode::Standard)
+    }
+}
 
 /// 고성능 체결 엔진
 /// 
@@ -217,7 +237,7 @@ pub struct HighPerformanceEngine {
     // 데이터베이스 (DB Writer용)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     
-    /// 데이터베이스 연결
+    /// 데이터베이스 연결 (표준 모드만 Some)
     /// 
     /// # 사용 목적
     /// - 서버 시작 시 잔고/주문 로드
@@ -226,7 +246,7 @@ pub struct HighPerformanceEngine {
     /// # 접근
     /// - `start()`에서만 사용 (초기화)
     /// - DB Writer 스레드에서 사용 (배치 쓰기)
-    db: Database,
+    db: Option<Database>,
     
     /// WAL 디렉토리 경로
     /// 
@@ -236,6 +256,9 @@ pub struct HighPerformanceEngine {
     /// # 환경 변수
     /// - `WAL_DIR`: WAL 디렉토리 경로 지정 가능
     wal_dir: std::path::PathBuf,
+
+    /// 실행 모드 (표준/벤치)
+    mode: EngineMode,
 }
 
 impl HighPerformanceEngine {
@@ -262,6 +285,15 @@ impl HighPerformanceEngine {
     /// engine.start().await?;  // 스레드 시작
     /// ```
     pub fn new(db: Database) -> Self {
+        Self::new_with_mode(db, EngineMode::Standard)
+    }
+
+    /// 벤치마크용 엔진 생성 (DB/WAL 비활성)
+    pub fn new_bench() -> Self {
+        Self::new_with_mode(None, EngineMode::Bench)
+    }
+
+    pub fn new_with_mode(db: impl Into<Option<Database>>, mode: EngineMode) -> Self {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. 채널 생성 (Lock-free Ring Buffer)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -272,11 +304,11 @@ impl HighPerformanceEngine {
         
         // WAL 메시지 채널 (크기: 10,000)
         // SPSC 패턴: Engine Thread (Producer) → WAL Thread (Consumer)
-        let (wal_tx, wal_rx) = bounded(10_000);
+        let (wal_tx_inner, wal_rx) = bounded(10_000);
         
         // DB Writer 채널 (크기: 10,000)
         // SPSC 패턴: Engine Thread (Producer) → DB Writer Thread (Consumer)
-        let (db_tx, db_rx) = bounded(10_000);
+        let (db_tx_inner, db_rx) = bounded(10_000);
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 2. 컴포넌트 초기화
@@ -289,7 +321,16 @@ impl HighPerformanceEngine {
         let matcher = Arc::new(Matcher::new());
         
         // Executor: BalanceCache 포함, WAL Sender + DB Sender 전달
-        let executor = Arc::new(Mutex::new(Executor::new(wal_tx.clone(), Some(db_tx.clone()))));
+        let executor = Arc::new(Mutex::new(Executor::new(
+            match mode {
+                EngineMode::Standard => Some(wal_tx_inner.clone()),
+                EngineMode::Bench => None,
+            },
+            match mode {
+                EngineMode::Standard => Some(db_tx_inner.clone()),
+                EngineMode::Bench => None,
+            },
+        )));
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 3. WAL 디렉토리 경로
@@ -299,12 +340,22 @@ impl HighPerformanceEngine {
             .map(|s| std::path::PathBuf::from(s))
             .unwrap_or_else(|_| std::path::PathBuf::from("./wal"));
         
+        let wal_sender = match mode {
+            EngineMode::Standard => Some(wal_tx_inner),
+            EngineMode::Bench => None,
+        };
+
+        let db_sender = match mode {
+            EngineMode::Standard => Some(db_tx_inner),
+            EngineMode::Bench => None,
+        };
+
         Self {
             order_tx: Some(order_tx),
             order_rx,
-            wal_tx: Some(wal_tx),
+            wal_tx: wal_sender,
             wal_rx,
-            db_tx: Some(db_tx),
+            db_tx: db_sender,
             db_rx,
             orderbooks,
             matcher,
@@ -313,8 +364,9 @@ impl HighPerformanceEngine {
             wal_thread: None,
             db_writer_thread: None,
             running: Arc::new(AtomicBool::new(false)),
-            db,
+            db: db.into(),
             wal_dir,
+            mode,
         }
     }
     
@@ -337,75 +389,92 @@ impl HighPerformanceEngine {
         use crate::domains::cex::engine::order_to_entry;
         use anyhow::Context;
         
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 1. DB에서 잔고 로드
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        
-        let balance_repo = UserBalanceRepository::new(self.db.pool().clone());
-        let all_balances = balance_repo.get_all_balances().await
-            .context("Failed to load balances from database")?;
-        
-        // 디버깅: 조회된 잔고 개수 확인
-        eprintln!("[Engine Start] Found {} balances in database", all_balances.len());
-        
-        // BalanceCache에 로드
-        {
+        if self.mode.load_from_db() {
+            let db = self
+                .db
+                .as_ref()
+                .context("Database unavailable in this mode")?;
+
+            let balance_repo = UserBalanceRepository::new(db.pool().clone());
+            let all_balances = balance_repo
+                .get_all_balances()
+                .await
+                .context("Failed to load balances from database")?;
+
+            eprintln!("[Engine Start] Found {} balances in database", all_balances.len());
+
+            {
+                let mut executor = self.executor.lock();
+                for balance in all_balances {
+                    executor.balance_cache_mut().set_balance(
+                        balance.user_id,
+                        &balance.mint_address,
+                        balance.available,
+                        balance.locked,
+                    );
+                    eprintln!(
+                        "[Engine Start] Loaded balance: user_id={}, mint={}, available={}, locked={}",
+                        balance.user_id, balance.mint_address, balance.available, balance.locked
+                    );
+                }
+            }
+
+            let order_repo = OrderRepository::new(db.pool().clone());
+            let active_orders = order_repo
+                .get_all_active_orders()
+                .await
+                .context("Failed to load active orders from database")?;
+
+            {
+                let mut orderbooks = self.orderbooks.write();
+                for order in active_orders {
+                    let entry = order_to_entry(&order);
+                    let pair = TradingPair::new(entry.base_mint.clone(), entry.quote_mint.clone());
+                    let pair_clone = pair.clone();
+                    let orderbook =
+                        orderbooks.entry(pair).or_insert_with(move || OrderBook::new(pair_clone));
+                    orderbook.add_order(entry);
+                }
+            }
+        } else {
             let mut executor = self.executor.lock();
-            for balance in all_balances {
-                executor.balance_cache_mut().set_balance(
-                    balance.user_id,
-                    &balance.mint_address,
-                    balance.available,
-                    balance.locked,
-                );
-                eprintln!(
-                    "[Engine Start] Loaded balance: user_id={}, mint={}, available={}, locked={}",
-                    balance.user_id, balance.mint_address, balance.available, balance.locked
-                );
-            }
+            executor.balance_cache_mut().clear();
+            drop(executor);
+            self.orderbooks.write().clear();
         }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 2. DB에서 활성 주문 로드
+        // 3. DB Writer 스레드 시작 (필요한 경우)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        
-        let order_repo = OrderRepository::new(self.db.pool().clone());
-        let active_orders = order_repo.get_all_active_orders().await
-            .context("Failed to load active orders from database")?;
-        
-        // OrderBook에 로드
-        {
-            let mut orderbooks = self.orderbooks.write();
-            for order in active_orders {
-                let entry = order_to_entry(&order);
-                let pair = TradingPair::new(entry.base_mint.clone(), entry.quote_mint.clone());
-                let pair_clone = pair.clone();
-                let orderbook = orderbooks.entry(pair).or_insert_with(move || OrderBook::new(pair_clone));
-                orderbook.add_order(entry);
-            }
+        if self.mode.use_db_writer() {
+            let db_rx = self.db_rx.clone();
+            let db_pool = self
+                .db
+                .as_ref()
+                .expect("DB must exist in Standard mode")
+                .pool()
+                .clone();
+            let db_writer_thread = thread::spawn(move || {
+                super::threads::db_writer_thread_loop(db_rx, db_pool);
+            });
+            self.db_writer_thread = Some(db_writer_thread);
+        } else {
+            self.db_writer_thread = None;
         }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 3. DB Writer 스레드 시작
+        // 4. WAL 스레드 시작 (필요한 경우)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        
-        let db_rx = self.db_rx.clone();
-        let db_pool = self.db.pool().clone();
-        let db_writer_thread = thread::spawn(move || {
-            super::threads::db_writer_thread_loop(db_rx, db_pool);
-        });
-        self.db_writer_thread = Some(db_writer_thread);
-        
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 4. WAL 스레드 시작
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        
-        let wal_rx = self.wal_rx.clone();
-        let wal_dir = self.wal_dir.clone();
-        let wal_thread = thread::spawn(move || {
-            super::threads::wal_thread_loop(wal_rx, wal_dir);
-        });
-        self.wal_thread = Some(wal_thread);
+        if self.mode.use_wal() {
+            let wal_rx = self.wal_rx.clone();
+            let wal_dir = self.wal_dir.clone();
+            let wal_thread = thread::spawn(move || {
+                super::threads::wal_thread_loop(wal_rx, wal_dir);
+            });
+            self.wal_thread = Some(wal_thread);
+        } else {
+            self.wal_thread = None;
+        }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 5. 실행 플래그 설정 (스레드 시작 전에 설정)
@@ -418,8 +487,8 @@ impl HighPerformanceEngine {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         let order_rx = self.order_rx.clone();
-        let wal_tx = self.wal_tx.as_ref().unwrap().clone();
-        let db_tx = self.db_tx.as_ref().unwrap().clone();
+        let wal_tx = self.wal_tx.clone();
+        let db_tx = self.db_tx.clone();
         let orderbooks = Arc::clone(&self.orderbooks);
         let matcher = Arc::clone(&self.matcher);
         let executor = Arc::clone(&self.executor);
@@ -501,6 +570,51 @@ impl HighPerformanceEngine {
         
         eprintln!("[Engine Stop] Shutdown complete");
         Ok(())
+    }
+
+    /// 벤치모드에서만 사용: 잔고 초기화
+    #[cfg(any(test, feature = "bench_mode"))]
+    pub fn bench_clear_balances(&self) {
+        if self.mode == EngineMode::Bench {
+            let mut executor = self.executor.lock();
+            executor.balance_cache_mut().clear();
+        }
+    }
+
+    /// 벤치모드에서만 사용: 오더북 초기화
+    #[cfg(any(test, feature = "bench_mode"))]
+    pub fn bench_clear_orderbooks(&self) {
+        if self.mode == EngineMode::Bench {
+            self.orderbooks.write().clear();
+        }
+    }
+
+    /// 벤치모드에서 잔고 설정
+    #[cfg(any(test, feature = "bench_mode"))]
+    pub fn bench_set_balance(&self, user_id: u64, mint: &str, available: Decimal, locked: Decimal) {
+        if self.mode == EngineMode::Bench {
+            let mut executor = self.executor.lock();
+            executor
+                .balance_cache_mut()
+                .set_balance(user_id, mint, available, locked);
+        }
+    }
+
+    /// 벤치모드에서 직접 주문 처리 (큐/oneshot 우회)
+    #[cfg(any(test, feature = "bench_mode"))]
+    pub fn bench_submit_direct(&self, order: OrderEntry) -> Result<Vec<MatchResult>> {
+        if self.mode != EngineMode::Bench {
+            anyhow::bail!("bench_submit_direct is only available in bench mode");
+        }
+
+        super::threads::process_submit_order(
+            order,
+            self.wal_tx.as_ref(),
+            self.db_tx.as_ref(),
+            &self.orderbooks,
+            &self.matcher,
+            &self.executor,
+        )
     }
 }
 

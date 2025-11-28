@@ -88,17 +88,23 @@ impl Matcher {
         let best_ask = match orderbook.get_best_ask() {
             Some(price) => price,
             None => {
-                eprintln!("[Matcher] No ask price available for buy order {}", buy_order.id);
+                #[cfg(not(feature = "bench_mode"))]
+                {
+                    eprintln!("[Matcher] No ask price available for buy order {}", buy_order.id);
+                }
                 return; // 매도 호가 없음
             }
         };
         
         // 디버깅: 시장가 매수 주문의 remaining_quote_amount 확인
         if buy_order.order_side == "market" {
-            eprintln!(
-                "[Matcher] Market buy order {}: remaining_quote_amount={:?}, remaining_amount={}, best_ask={}",
-                buy_order.id, buy_order.remaining_quote_amount, buy_order.remaining_amount, best_ask
-            );
+            #[cfg(not(feature = "bench_mode"))]
+            {
+                eprintln!(
+                    "[Matcher] Market buy order {}: remaining_quote_amount={:?}, remaining_amount={}, best_ask={}",
+                    buy_order.id, buy_order.remaining_quote_amount, buy_order.remaining_amount, best_ask
+                );
+            }
         }
         
         // 지정가 주문: 가격 확인
