@@ -13,6 +13,7 @@ use std::sync::Arc;
 use anyhow::{Result, Context};
 use crossbeam::channel::Receiver;
 use parking_lot::{RwLock, Mutex};
+use rust_decimal::Decimal;
 use sqlx::PgPool;
 
 use crate::domains::cex::engine::types::{TradingPair, OrderEntry, MatchResult};
@@ -196,7 +197,45 @@ fn handle_submit_order(
     // 1. TradingPair 찾기
     let pair = TradingPair::new(order.base_mint.clone(), order.quote_mint.clone());
     
-    // 2. WAL 메시지 발행 (OrderCreated) - 먼저!
+    // 2. 잔고 잠금 (주문 제출 전에 잠금)
+    {
+        let mut executor_guard = executor.lock();
+        let (lock_mint, lock_amount) = if order.order_type == "buy" {
+            // 매수: quote_mint 잠금
+            // 지정가: price * amount
+            // 시장가: quote_amount
+            let amount = if order.order_side == "market" {
+                // 시장가 매수: quote_amount 사용
+                order.quote_amount.unwrap_or(rust_decimal::Decimal::ZERO)
+            } else {
+                // 지정가 매수: price * amount
+                order.price.unwrap_or(rust_decimal::Decimal::ZERO) * order.amount
+            };
+            (&order.quote_mint, amount)
+        } else {
+            // 매도: base_mint 잠금 (amount만큼)
+            (&order.base_mint, order.amount)
+        };
+        
+        if let Err(e) = executor_guard.lock_balance_for_order(order.id, order.user_id, lock_mint, lock_amount) {
+            // 에러 상세 정보 출력
+            if let Some(balance) = executor_guard.balance_cache().get_balance(order.user_id, lock_mint) {
+                eprintln!(
+                    "Lock failed: user_id={}, mint={}, available={}, locked={}, required={}, error={}",
+                    order.user_id, lock_mint, balance.available, balance.locked, lock_amount, e
+                );
+            } else {
+                eprintln!(
+                    "Lock failed: user_id={}, mint={}, required={}, error={} (balance not found in cache)",
+                    order.user_id, lock_mint, lock_amount, e
+                );
+            }
+            let _ = response.send(Err(anyhow::anyhow!("Failed to lock balance: {}", e)));
+            return;
+        }
+    }
+    
+    // 3. WAL 메시지 발행 (OrderCreated) - 잔고 잠금 후!
     let wal_entry = WalEntry::OrderCreated {
         order_id: order.id,
         user_id: order.user_id,
@@ -209,30 +248,150 @@ fn handle_submit_order(
     };
     let _ = wal_tx.send(wal_entry);
     
-    // 3. OrderBook 가져오기 및 매칭 (락 안에서 수행)
-    let matches = {
+    // 4. 시장가 주문 여부 및 초기 잔고 잠금 정보 저장 (order 이동 전)
+    let is_market_order = order.order_side == "market";
+    let initial_quote_amount = order.quote_amount;
+    let initial_amount = order.amount;
+    
+    // 5. OrderBook 가져오기 및 매칭 (락 안에서 수행)
+    let (matches, order_after_match) = {
         let mut orderbooks_guard = orderbooks.write();
         let orderbook = orderbooks_guard.entry(pair.clone()).or_insert_with(|| OrderBook::new(pair.clone()));
         
-        // 4. OrderBook에 추가
-        orderbook.add_order(order.clone());
+        // 6. Matcher로 매칭 시도 (먼저 매칭 시도)
+        let matches = matcher.match_order(&mut order, orderbook);
         
-        // 5. Matcher로 매칭 시도 (락 안에서 수행)
-        matcher.match_order(&mut order, orderbook)
+        // 7. 매칭 후 남은 주문이 있으면 OrderBook에 추가
+        // 시장가 주문은 완전히 체결되지 않으면 오더북에 추가하지 않음 (시장가 주문은 즉시 체결되어야 함)
+        // 지정가 주문은 부분 체결 후 남은 수량이 있으면 오더북에 추가
+        if order.order_side == "limit" {
+            // 지정가 주문: 남은 수량이 있으면 오더북에 추가
+            let has_remaining = if let Some(remaining_quote) = order.remaining_quote_amount {
+                remaining_quote > Decimal::ZERO
+            } else {
+                order.remaining_amount > Decimal::ZERO
+            };
+            
+            if has_remaining {
+                orderbook.add_order(order.clone()); // order는 나중에 사용하므로 클론
+            }
+        }
+        // 시장가 주문은 완전히 체결되지 않으면 오더북에 추가하지 않음
+        
+        // order 상태 저장 (매칭 후)
+        let order_after_match = order.clone();
+        (matches, order_after_match)
     };
     
-    // 6. 체결 처리 (락 밖에서 수행)
+    // 8. 시장가 주문 완전 체결 확인 및 처리
+    let is_fully_filled = if is_market_order {
+        // 시장가 주문: 완전히 체결되었는지 확인
+        if let Some(remaining_quote) = order_after_match.remaining_quote_amount {
+            // 시장가 매수 (금액 기반): remaining_quote_amount가 0이면 완전 체결
+            remaining_quote <= Decimal::ZERO
+        } else {
+            // 시장가 매도 (수량 기반): remaining_amount가 0이면 완전 체결
+            order_after_match.remaining_amount == Decimal::ZERO
+        }
+    } else {
+        // 지정가 주문: 항상 성공 (부분 체결되어도 오더북에 추가됨)
+        true
+    };
+    
+    // 시장가 주문이 완전히 체결되지 않았으면 잔고 잠금 해제 및 에러 반환
+    if is_market_order && !is_fully_filled {
+        // 부분 체결이 있으면 먼저 처리
+        {
+            let mut executor_guard = executor.lock();
+            for match_result in &matches {
+                if let Err(e) = executor_guard.execute_trade(match_result) {
+                    eprintln!("Failed to execute trade: {}", e);
+                }
+            }
+        }
+        
+        // 남은 잔고 잠금 해제
+        {
+            let mut executor_guard = executor.lock();
+            let (unlock_mint, unlock_amount) = if order_after_match.order_type == "buy" {
+                // 시장가 매수: 남은 quote_amount만큼 USDT 잠금 해제
+                let remaining = order_after_match.remaining_quote_amount.unwrap_or(Decimal::ZERO);
+                (&order_after_match.quote_mint, remaining)
+            } else {
+                // 시장가 매도: 남은 amount만큼 SOL 등 잠금 해제
+                (&order_after_match.base_mint, order_after_match.remaining_amount)
+            };
+            
+            if unlock_amount > Decimal::ZERO {
+                if let Err(e) = executor_guard.unlock_balance_for_cancel(
+                    order_after_match.id,
+                    order_after_match.user_id,
+                    unlock_mint,
+                    unlock_amount,
+                ) {
+                    eprintln!("Failed to unlock balance: {}", e);
+                }
+            }
+        }
+        
+        // 에러 반환
+        let _ = response.send(Err(anyhow::anyhow!(
+            "Market order partially filled or not filled at all. Matches: {}, Remaining: {}",
+            matches.len(),
+            if order_after_match.order_type == "buy" {
+                order_after_match.remaining_quote_amount.unwrap_or(Decimal::ZERO)
+            } else {
+                order_after_match.remaining_amount
+            }
+        )));
+        return;
+    }
+    
+    // 시장가 주문이 매칭되지 않았으면 (matches가 비어있음) 잔고 잠금 해제 및 에러 반환
+    if is_market_order && matches.is_empty() {
+        // 잔고 잠금 해제
+        {
+            let mut executor_guard = executor.lock();
+            let (unlock_mint, unlock_amount) = if order_after_match.order_type == "buy" {
+                // 시장가 매수: 전체 quote_amount만큼 USDT 잠금 해제
+                let amount = initial_quote_amount.unwrap_or(Decimal::ZERO);
+                (&order_after_match.quote_mint, amount)
+            } else {
+                // 시장가 매도: 전체 amount만큼 SOL 등 잠금 해제
+                (&order_after_match.base_mint, initial_amount)
+            };
+            
+            if unlock_amount > Decimal::ZERO {
+                if let Err(e) = executor_guard.unlock_balance_for_cancel(
+                    order_after_match.id,
+                    order_after_match.user_id,
+                    unlock_mint,
+                    unlock_amount,
+                ) {
+                    eprintln!("Failed to unlock balance: {}", e);
+                }
+            }
+        }
+        
+        // 에러 반환
+        let _ = response.send(Err(anyhow::anyhow!(
+            "Market order cannot be filled: no matching orders in orderbook"
+        )));
+        return;
+    }
+    
+    // 8. 체결 처리 (정상 케이스: 지정가 주문 또는 완전히 체결된 시장가 주문)
     {
         let mut executor_guard = executor.lock();
         for match_result in &matches {
             if let Err(e) = executor_guard.execute_trade(match_result) {
-                // 에러 발생 시 로그 기록 (나중에 구현)
+                // 에러 발생 시 로그 기록
                 eprintln!("Failed to execute trade: {}", e);
             }
         }
     }
     
-    // 7. 결과 반환
+    // 9. 결과 반환
     let _ = response.send(Ok(matches));
 }
 
