@@ -32,6 +32,10 @@ CREATE TABLE IF NOT EXISTS trades (
     buy_order_id BIGINT NOT NULL REFERENCES orders(id),   -- 매수 주문 ID
     sell_order_id BIGINT NOT NULL REFERENCES orders(id),  -- 매도 주문 ID
     
+    -- 체결 참여자 정보 (주문 테이블을 다시 조회하지 않고 바로 사용하기 위함)
+    buyer_id BIGINT NOT NULL REFERENCES users(id),   -- 매수자 사용자 ID
+    seller_id BIGINT NOT NULL REFERENCES users(id),  -- 매도자 사용자 ID
+    
     -- 거래쌍 정보 (주문에서 복사)
     base_mint VARCHAR(255) NOT NULL,   -- 기준 자산 (예: SOL)
     quote_mint VARCHAR(255) NOT NULL,  -- 기준 통화 (예: USDT)
@@ -54,6 +58,8 @@ COMMENT ON TABLE trades IS '체결 내역 테이블 (주문 매칭 후 실제 �
 COMMENT ON COLUMN trades.id IS '체결 내역 고유 ID';
 COMMENT ON COLUMN trades.buy_order_id IS '매수 주문 ID (누가 구매했는지, 봇 주문 포함)';
 COMMENT ON COLUMN trades.sell_order_id IS '매도 주문 ID (누가 판매했는지, 봇 주문 포함)';
+COMMENT ON COLUMN trades.buyer_id IS '매수자 사용자 ID (orders.user_id와 동일, 빠른 조회용)';
+COMMENT ON COLUMN trades.seller_id IS '매도자 사용자 ID (orders.user_id와 동일, 빠른 조회용)';
 COMMENT ON COLUMN trades.base_mint IS '거래된 자산 (SOL, USDC 등)';
 COMMENT ON COLUMN trades.quote_mint IS '기준 통화 (항상 USDT)';
 COMMENT ON COLUMN trades.price IS '체결 가격 (USDT 기준, 예: SOL 1개 = 100 USDT)';
@@ -69,4 +75,8 @@ CREATE INDEX IF NOT EXISTS idx_trades_pair_time ON trades(base_mint, quote_mint,
 -- 사용자가 자신의 주문이 언제, 얼마나 체결되었는지 확인할 때 사용
 CREATE INDEX IF NOT EXISTS idx_trades_buy_order ON trades(buy_order_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trades_sell_order ON trades(sell_order_id, created_at DESC);
+
+-- 사용자별 체결 내역 조회
+CREATE INDEX IF NOT EXISTS idx_trades_buyer ON trades(buyer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_trades_seller ON trades(seller_id, created_at DESC);
 
