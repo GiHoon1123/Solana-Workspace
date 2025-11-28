@@ -130,6 +130,13 @@ impl Matcher {
             
             // FIFO: 가장 오래된 주문부터 매칭
             while let Some(mut sell_order) = sell_orders.pop_front() {
+                // Self-Trade 금지: 같은 유저의 주문은 매칭하지 않음
+                if buy_order.user_id == sell_order.user_id {
+                    // 같은 유저의 주문이므로 다시 큐에 추가하고 다음 주문으로
+                    sell_orders.push_back(sell_order);
+                    continue;
+                }
+                
                 // 매칭 수량 계산
                 let match_amount = if let Some(remaining_quote) = buy_order.remaining_quote_amount {
                     // 시장가 매수 금액 기반: remaining_quote_amount / price로 수량 계산
@@ -263,6 +270,13 @@ impl Matcher {
             
             // FIFO: 가장 오래된 주문부터 매칭
             while let Some(mut buy_order) = buy_orders.pop_front() {
+                // Self-Trade 금지: 같은 유저의 주문은 매칭하지 않음
+                if buy_order.user_id == sell_order.user_id {
+                    // 같은 유저의 주문이므로 다시 큐에 추가하고 다음 주문으로
+                    buy_orders.push_back(buy_order);
+                    continue;
+                }
+                
                 // 매칭 수량 계산 (둘 중 작은 것)
                 let match_amount = sell_order.remaining_amount.min(buy_order.remaining_amount);
                 
@@ -334,8 +348,10 @@ mod tests {
             quote_mint: "USDT".to_string(),
             price: price.map(|p| Decimal::from_f64_retain(p).unwrap()),
             amount: Decimal::from_f64_retain(amount).unwrap(),
+            quote_amount: None,
             filled_amount: Decimal::ZERO,
             remaining_amount: Decimal::from_f64_retain(amount).unwrap(),
+            remaining_quote_amount: None,
             created_at: Utc::now(),
         }
     }
