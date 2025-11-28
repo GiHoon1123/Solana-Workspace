@@ -74,6 +74,7 @@ use super::config::CoreConfig;
 pub fn engine_thread_loop(
     order_rx: Receiver<OrderCommand>,
     wal_tx: crossbeam::channel::Sender<WalEntry>,
+    db_tx: crossbeam::channel::Sender<super::db_commands::DbCommand>,
     orderbooks: Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
     matcher: Arc<Matcher>,
     executor: Arc<Mutex<Executor>>,
@@ -113,6 +114,7 @@ pub fn engine_thread_loop(
                             order,
                             response,
                             &wal_tx,
+                            &db_tx,
                             &orderbooks,
                             &matcher,
                             &executor,
@@ -191,6 +193,7 @@ fn handle_submit_order(
     mut order: OrderEntry,
     response: tokio::sync::oneshot::Sender<Result<Vec<MatchResult>>>,
     wal_tx: &crossbeam::channel::Sender<WalEntry>,
+    db_tx: &crossbeam::channel::Sender<super::db_commands::DbCommand>,
     orderbooks: &Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
     matcher: &Arc<Matcher>,
     executor: &Arc<Mutex<Executor>>,
@@ -248,6 +251,20 @@ fn handle_submit_order(
         timestamp: order.created_at.timestamp_millis(),
     };
     let _ = wal_tx.send(wal_entry);
+    
+    // 3-1. 주문을 DB에 저장 (배치로 처리됨, trade insert 전에 필요 - 외래키 제약)
+    let db_cmd = super::db_commands::DbCommand::InsertOrder {
+        order_id: order.id,
+        user_id: order.user_id,
+        order_type: order.order_type.clone(),
+        order_side: order.order_side.clone(),
+        base_mint: order.base_mint.clone(),
+        quote_mint: order.quote_mint.clone(),
+        price: order.price,
+        amount: order.amount,
+        created_at: order.created_at,
+    };
+    let _ = db_tx.send(db_cmd); // Non-blocking, 배치로 처리됨
     
     // 4. 시장가 주문 여부 및 초기 잔고 잠금 정보 저장 (order 이동 전)
     let is_market_order = order.order_side == "market";

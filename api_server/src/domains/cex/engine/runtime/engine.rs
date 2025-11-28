@@ -419,6 +419,7 @@ impl HighPerformanceEngine {
         
         let order_rx = self.order_rx.clone();
         let wal_tx = self.wal_tx.as_ref().unwrap().clone();
+        let db_tx = self.db_tx.as_ref().unwrap().clone();
         let orderbooks = Arc::clone(&self.orderbooks);
         let matcher = Arc::clone(&self.matcher);
         let executor = Arc::clone(&self.executor);
@@ -428,6 +429,7 @@ impl HighPerformanceEngine {
             super::threads::engine_thread_loop(
                 order_rx,
                 wal_tx,
+                db_tx,
                 orderbooks,
                 matcher,
                 executor,
