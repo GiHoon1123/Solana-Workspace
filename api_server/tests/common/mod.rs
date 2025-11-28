@@ -1,13 +1,20 @@
 // =====================================================
-// 엔진 통합 테스트
+// 통합 테스트 공통 헬퍼
 // =====================================================
-// 목적: 엔진의 전체 로직이 올바르게 동작하는지 검증
+// 목적: 모든 통합 테스트에서 공통으로 사용하는 셋업/티어다운 함수 제공
 // 
-// 테스트 순서:
-// 1. 데이터베이스 연결
-// 2. 마이그레이션 실행
-// 3. 초기 잔고 생성
-// 4. 엔진 생성 및 시작
+// 사용법:
+// ```rust
+// mod common;
+// use common::*;
+// 
+// #[tokio::test]
+// async fn test_something() {
+//     let (mut engine, db) = setup_test().await;
+//     // 테스트 코드...
+//     teardown_test(&mut engine, &db).await;
+// }
+// ```
 // =====================================================
 
 use rust_decimal::Decimal;
@@ -17,23 +24,23 @@ use api_server::domains::cex::engine::types::OrderEntry;
 use api_server::domains::cex::engine::Engine;
 
 // 테스트용 상수
-const TEST_DATABASE_URL: &str = "postgresql://root:1234@localhost/solana_api_test";
-const TEST_USER_ID: u64 = 1;  // 실제 테스트에 사용할 유저 ID
-const NUM_TEST_USERS: u64 = 100;  // 오더북 채우기용 유저 수
+pub const TEST_DATABASE_URL: &str = "postgresql://root:1234@localhost/solana_api_test";
+pub const TEST_USER_ID: u64 = 1;  // 실제 테스트에 사용할 유저 ID
+pub const NUM_TEST_USERS: u64 = 100;  // 오더북 채우기용 유저 수
 
 // 초기 잔고 (함수로 생성)
-fn initial_sol_balance() -> Decimal {
+pub fn initial_sol_balance() -> Decimal {
     Decimal::new(10000, 0)  // 10,000 SOL
 }
 
-fn initial_usdt_balance() -> Decimal {
+pub fn initial_usdt_balance() -> Decimal {
     Decimal::new(10000000, 0)  // 10,000,000 USDT
 }
 
 /// 테스트 전 초기화
 /// 
 /// 데이터베이스 연결, 마이그레이션, 초기 잔고 설정을 순차적으로 수행합니다.
-async fn setup_test() -> (HighPerformanceEngine, Database) {
+pub async fn setup_test() -> (HighPerformanceEngine, Database) {
     // 1. 데이터베이스 연결
     let db = Database::new(TEST_DATABASE_URL)
         .await
@@ -63,7 +70,7 @@ async fn setup_test() -> (HighPerformanceEngine, Database) {
 /// 테스트 후 정리
 /// 
 /// 엔진을 중지하고 테스트 데이터를 정리합니다.
-async fn teardown_test(engine: &mut HighPerformanceEngine, db: &Database) {
+pub async fn teardown_test(engine: &mut HighPerformanceEngine, db: &Database) {
     // 엔진 중지
     engine.stop().await.expect("Failed to stop engine");
     
@@ -74,7 +81,7 @@ async fn teardown_test(engine: &mut HighPerformanceEngine, db: &Database) {
 /// 테스트 데이터 정리
 /// 
 /// 이전 테스트에서 남은 데이터를 삭제합니다.
-async fn cleanup_test_data(db: &Database) {
+pub async fn cleanup_test_data(db: &Database) {
     use sqlx::query;
     
     let pool = db.pool();
@@ -93,7 +100,7 @@ async fn cleanup_test_data(db: &Database) {
 /// - 유저 100명 생성
 /// - 각 유저에게 SOL, USDT 잔고 부여
 /// - 실제 테스트는 TEST_USER_ID (1번 유저)만 사용
-async fn setup_test_balances(db: &Database) {
+pub async fn setup_test_balances(db: &Database) {
     use sqlx::query;
     
     let pool = db.pool();
@@ -164,7 +171,7 @@ async fn setup_test_balances(db: &Database) {
 /// - 유저 51~100: 매도 주문 (가격 101~110 USDT, 매도 가격 > 매수 가격)
 /// 
 /// 이렇게 하면 매칭되지 않고 오더북에만 쌓입니다.
-async fn setup_orderbook(engine: &mut HighPerformanceEngine) {
+pub async fn setup_orderbook(engine: &mut HighPerformanceEngine) {
     use chrono::Utc;
     
     // 매수 주문: 유저 2~50번 (가격 90~100 USDT)
@@ -227,68 +234,7 @@ async fn setup_orderbook(engine: &mut HighPerformanceEngine) {
             .expect(&format!("Failed to submit sell order for user {}", user_id));
     }
     
-    println!("Orderbook populated: {} buy orders (90-100 USDT) + {} sell orders (101-110 USDT)", 
+    println!("✅ Orderbook populated: {} buy orders (90-100 USDT) + {} sell orders (101-110 USDT)", 
              49, 50);
 }
 
-/// 테스트: 엔진 시작 및 중지
-/// 
-/// 엔진이 정상적으로 시작되고 중지되는지 확인합니다.
-#[tokio::test]
-async fn test_engine_start_stop() {
-    let (mut engine, db) = setup_test().await;
-    
-    // 엔진이 정상적으로 시작되었는지 확인
-    // (에러가 없으면 성공)
-    
-    teardown_test(&mut engine, &db).await;
-}
-
-/// 테스트: 잔고 조회
-/// 
-/// 엔진 시작 후 잔고가 제대로 로드되었는지 확인합니다.
-#[tokio::test]
-async fn test_balance_loaded() {
-    let (mut engine, db) = setup_test().await;
-    
-    // SOL 잔고 조회
-    let (sol_available, sol_locked) = engine.get_balance(TEST_USER_ID, "SOL").await
-        .expect("Failed to get SOL balance");
-    assert_eq!(sol_available, initial_sol_balance());
-    assert_eq!(sol_locked, Decimal::ZERO);
-    
-    // USDT 잔고 조회
-    let (usdt_available, usdt_locked) = engine.get_balance(TEST_USER_ID, "USDT").await
-        .expect("Failed to get USDT balance");
-    assert_eq!(usdt_available, initial_usdt_balance());
-    assert_eq!(usdt_locked, Decimal::ZERO);
-    
-    teardown_test(&mut engine, &db).await;
-}
-
-/// 테스트: 모든 유저 잔고 로드 확인
-/// 
-/// 100명의 유저 잔고가 모두 엔진에 로드되었는지 확인합니다.
-#[tokio::test]
-async fn test_all_users_balances_loaded() {
-    let (mut engine, db) = setup_test().await;
-    
-    // 1번부터 100번까지 모든 유저의 잔고 확인
-    for user_id in 1..=NUM_TEST_USERS {
-        // SOL 잔고 조회
-        let (sol_available, sol_locked) = engine.get_balance(user_id, "SOL").await
-            .expect(&format!("Failed to get SOL balance for user {}", user_id));
-        assert_eq!(sol_available, initial_sol_balance(), "User {} SOL balance mismatch", user_id);
-        assert_eq!(sol_locked, Decimal::ZERO, "User {} SOL locked should be 0", user_id);
-        
-        // USDT 잔고 조회
-        let (usdt_available, usdt_locked) = engine.get_balance(user_id, "USDT").await
-            .expect(&format!("Failed to get USDT balance for user {}", user_id));
-        assert_eq!(usdt_available, initial_usdt_balance(), "User {} USDT balance mismatch", user_id);
-        assert_eq!(usdt_locked, Decimal::ZERO, "User {} USDT locked should be 0", user_id);
-    }
-    
-    println!("All {} users' balances loaded successfully", NUM_TEST_USERS);
-    
-    teardown_test(&mut engine, &db).await;
-}
