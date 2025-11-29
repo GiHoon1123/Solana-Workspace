@@ -12,6 +12,7 @@
 
 pub mod config;
 pub mod commands;
+pub mod balance_commands;
 pub mod engine;
 pub mod threads;
 pub mod db_commands;
@@ -19,5 +20,6 @@ pub mod db_commands;
 pub use engine::HighPerformanceEngine;
 pub use config::CoreConfig;
 pub use commands::OrderCommand;
+pub use balance_commands::BalanceCommand;
 pub use db_commands::DbCommand;
 pub use threads::{engine_thread_loop, wal_thread_loop, db_writer_thread_loop};

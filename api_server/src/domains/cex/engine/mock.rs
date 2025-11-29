@@ -83,6 +83,17 @@ impl Engine for MockEngine {
         Ok((Decimal::MAX, Decimal::ZERO))
     }
 
+    async fn update_balance(
+        &self,
+        _user_id: u64,
+        _mint: &str,
+        _available_delta: Decimal,
+    ) -> Result<()> {
+        // TODO: 실제 잔고 업데이트 구현 필요
+        // 일단 성공으로 처리 (테스트용)
+        Ok(())
+    }
+
     async fn start(&mut self) -> Result<()> {
         // TODO: 실제 엔진 시작 로직 구현 필요
         Ok(())

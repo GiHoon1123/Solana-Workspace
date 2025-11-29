@@ -293,6 +293,53 @@ pub trait Engine: Send + Sync {
     /// * `(available, locked)` - (사용 가능, 잠김) 잔고
     async fn get_balance(&self, user_id: u64, mint: &str) -> Result<(Decimal, Decimal)>;
 
+    /// 잔고 업데이트 (입금/출금)
+    /// Update balance (deposit/withdrawal)
+    /// 
+    /// 외부 입금/출금 이벤트를 처리하여 사용자 잔고를 업데이트합니다.
+    /// 
+    /// # 사용 시나리오
+    /// 1. 외부 지갑에서 우리 지갑으로 자산 입금 (온체인 트랜잭션)
+    /// 2. 어드민 또는 이벤트로 인한 서비스 내 잔액 업데이트
+    /// 
+    /// # Arguments
+    /// * `user_id` - 사용자 ID
+    /// * `mint` - 자산 종류 (예: "SOL", "USDT")
+    /// * `available_delta` - available 증감량 (양수: 입금, 음수: 출금)
+    /// 
+    /// # Returns
+    /// * `Ok(())` - 업데이트 성공
+    /// * `Err` - 업데이트 실패
+    /// 
+    /// # 처리 과정
+    /// 1. BalanceCache에서 잔고 조회/생성
+    /// 2. available 업데이트 (기존 + delta)
+    /// 3. WAL 메시지 발행 (BalanceUpdated)
+    /// 4. DB 명령 전송 (UpdateBalance) → DB Writer가 배치로 처리
+    /// 
+    /// # Examples
+    /// ```rust
+    /// // 100 USDT 입금
+    /// engine.update_balance(
+    ///     123,  // user_id
+    ///     "USDT",
+    ///     Decimal::new(100, 0),  // +100 USDT
+    /// ).await?;
+    /// 
+    /// // 50 USDT 출금
+    /// engine.update_balance(
+    ///     123,  // user_id
+    ///     "USDT",
+    ///     Decimal::new(-50, 0),  // -50 USDT
+    /// ).await?;
+    /// ```
+    async fn update_balance(
+        &self,
+        user_id: u64,
+        mint: &str,
+        available_delta: Decimal,
+    ) -> Result<()>;
+
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 시스템 관리 (System Management)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

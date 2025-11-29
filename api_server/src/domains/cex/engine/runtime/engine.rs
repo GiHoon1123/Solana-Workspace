@@ -37,6 +37,7 @@ use crate::domains::cex::engine::wal::WalEntry;
 use crate::domains::cex::engine::Engine;
 
 use super::commands::OrderCommand;
+use super::balance_commands::BalanceCommand;
 use super::config::CoreConfig;
 use super::db_commands::DbCommand;
 
@@ -109,6 +110,28 @@ pub struct HighPerformanceEngine {
     /// # 사용 위치
     /// - `engine_thread_loop()`에서 `order_rx.recv()` 호출
     order_rx: Receiver<OrderCommand>,
+    
+    /// 잔고 업데이트 명령 전송 채널 (Sender)
+    /// 
+    /// 외부 입금/출금 서비스에서 엔진 스레드로 잔고 업데이트를 전송할 때 사용
+    /// 
+    /// # 특징
+    /// - Lock-free: 락 없이 동작 (스핀락도 없음)
+    /// - 링버퍼: 고정 크기 버퍼를 순환 사용
+    /// - SPSC: Single Producer, Single Consumer
+    /// - 성능: ~100ns (메모리 연산)
+    /// 
+    /// # 우선순위
+    /// - 주문 큐보다 우선 처리 (입금이 선행되어야 주문 가능)
+    balance_tx: Option<Sender<BalanceCommand>>,
+    
+    /// 잔고 업데이트 명령 수신 채널 (Receiver)
+    /// 
+    /// 엔진 스레드에서 잔고 업데이트를 수신할 때 사용
+    /// 
+    /// # 사용 위치
+    /// - `engine_thread_loop()`에서 `balance_rx.try_recv()` 호출 (우선순위 높음)
+    balance_rx: Receiver<BalanceCommand>,
     
     /// WAL 메시지 전송 채널 (Sender)
     /// 
@@ -302,6 +325,11 @@ impl HighPerformanceEngine {
         // SPSC 패턴: API Handler (Producer) → Engine Thread (Consumer)
         let (order_tx, order_rx) = bounded(10_000);
         
+        // 잔고 업데이트 채널 (크기: 10,000)
+        // SPSC 패턴: 외부 입금/출금 서비스 (Producer) → Engine Thread (Consumer)
+        // 우선순위: 주문 큐보다 높음 (입금이 선행되어야 주문 가능)
+        let (balance_tx, balance_rx) = bounded(10_000);
+        
         // WAL 메시지 채널 (크기: 10,000)
         // SPSC 패턴: Engine Thread (Producer) → WAL Thread (Consumer)
         let (wal_tx_inner, wal_rx) = bounded(10_000);
@@ -353,6 +381,8 @@ impl HighPerformanceEngine {
         Self {
             order_tx: Some(order_tx),
             order_rx,
+            balance_tx: Some(balance_tx),
+            balance_rx,
             wal_tx: wal_sender,
             wal_rx,
             db_tx: db_sender,
@@ -487,6 +517,7 @@ impl HighPerformanceEngine {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
         let order_rx = self.order_rx.clone();
+        let balance_rx = self.balance_rx.clone();
         let wal_tx = self.wal_tx.clone();
         let db_tx = self.db_tx.clone();
         let orderbooks = Arc::clone(&self.orderbooks);
@@ -497,6 +528,7 @@ impl HighPerformanceEngine {
         let engine_thread = thread::spawn(move || {
             super::threads::engine_thread_loop(
                 order_rx,
+                balance_rx,
                 wal_tx,
                 db_tx,
                 orderbooks,
@@ -544,6 +576,8 @@ impl HighPerformanceEngine {
         eprintln!("[Engine Stop] Closing channels...");
         drop(self.order_tx.take());
         eprintln!("[Engine Stop] order_tx closed");
+        drop(self.balance_tx.take());
+        eprintln!("[Engine Stop] balance_tx closed");
         drop(self.wal_tx.take());
         eprintln!("[Engine Stop] wal_tx closed");
         drop(self.db_tx.take());
@@ -790,6 +824,31 @@ impl Engine for HighPerformanceEngine {
         timeout(Duration::from_secs(5), rx)
             .await
             .map_err(|_| anyhow::anyhow!("Get balance timeout"))?
+            .map_err(|e| anyhow::anyhow!("Failed to receive response: {}", e))?
+    }
+    
+    /// 잔고 업데이트 (입금/출금)
+    async fn update_balance(
+        &self,
+        user_id: u64,
+        mint: &str,
+        available_delta: Decimal,
+    ) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        
+        let cmd = BalanceCommand::UpdateBalance {
+            user_id,
+            mint: mint.to_string(),
+            available_delta,
+            response: tx,
+        };
+        
+        self.balance_tx.as_ref().unwrap().send(cmd)
+            .map_err(|e| anyhow::anyhow!("Failed to send update_balance command: {}", e))?;
+        
+        timeout(Duration::from_millis(100), rx)
+            .await
+            .map_err(|_| anyhow::anyhow!("Update balance timeout"))?
             .map_err(|e| anyhow::anyhow!("Failed to receive response: {}", e))?
     }
     
