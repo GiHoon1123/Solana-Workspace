@@ -122,7 +122,7 @@ export default function TradeHistory() {
               <span className="text-gray-400 text-xs">{trade.time}</span>
               <span
                 className={`font-medium ${
-                  trade.type === 'buy' ? 'text-blue-400' : 'text-red-400'
+                  trade.type === 'buy' ? 'text-red-400' : 'text-blue-400'
                 }`}
               >
                 {trade.price > 0 ? trade.price.toFixed(2) : '--'}

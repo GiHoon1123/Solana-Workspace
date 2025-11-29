@@ -156,14 +156,14 @@ export default function OrderBook() {
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* 매도 호가 */}
         <div className="flex-shrink-0 mb-3">
-          <div className="text-xs text-red-400 font-semibold mb-2">매도</div>
+          <div className="text-xs text-blue-400 font-semibold mb-2">매도</div>
           <div className="space-y-0.5 max-h-32 overflow-y-auto">
             {sellOrders.map((order, index) => (
               <div
                 key={`sell-${index}`}
                 className="flex justify-between items-center text-sm hover:bg-gray-700 px-2 py-1 rounded"
               >
-                <span className="text-red-400">
+                <span className="text-blue-400">
                   {order.price > 0 ? order.price.toFixed(2) : '--'}
                 </span>
                 <span className="text-gray-300">
@@ -198,14 +198,14 @@ export default function OrderBook() {
 
         {/* 매수 호가 */}
         <div className="flex-1 min-h-0 flex flex-col">
-          <div className="text-xs text-blue-400 font-semibold mb-2 flex-shrink-0">매수</div>
+          <div className="text-xs text-red-400 font-semibold mb-2 flex-shrink-0">매수</div>
           <div className="flex-1 overflow-y-auto space-y-0.5">
             {buyOrders.map((order, index) => (
               <div
                 key={`buy-${index}`}
                 className="flex justify-between items-center text-sm hover:bg-gray-700 px-2 py-1 rounded"
               >
-                <span className="text-blue-400">
+                <span className="text-red-400">
                   {order.price > 0 ? order.price.toFixed(2) : '--'}
                 </span>
                 <span className="text-gray-300">

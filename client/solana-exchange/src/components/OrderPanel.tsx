@@ -69,7 +69,7 @@ export default function OrderPanel() {
           onClick={() => setOrderType('buy')}
           className={`flex-1 py-2.5 px-4 rounded-l font-semibold text-sm transition-colors ${
             orderType === 'buy'
-              ? 'bg-blue-600 text-white'
+              ? 'bg-red-600 text-white'
               : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
           }`}
         >
@@ -79,7 +79,7 @@ export default function OrderPanel() {
           onClick={() => setOrderType('sell')}
           className={`flex-1 py-2.5 px-4 rounded-r font-semibold text-sm transition-colors ${
             orderType === 'sell'
-              ? 'bg-red-600 text-white'
+              ? 'bg-blue-600 text-white'
               : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
           }`}
         >
@@ -140,8 +140,8 @@ export default function OrderPanel() {
           type="submit"
           className={`w-full py-2.5 rounded font-semibold transition-colors ${
             orderType === 'buy'
-              ? 'bg-blue-600 hover:bg-blue-700 text-white'
-              : 'bg-red-600 hover:bg-red-700 text-white'
+              ? 'bg-red-600 hover:bg-red-700 text-white'
+              : 'bg-blue-600 hover:bg-blue-700 text-white'
           }`}
         >
           주문하기
