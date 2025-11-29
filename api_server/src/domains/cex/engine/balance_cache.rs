@@ -235,6 +235,36 @@ impl BalanceCache {
         );
     }
 
+    /// 사용 가능 잔고 증가/감소 (입금/출금용)
+    /// 
+    /// # Arguments
+    /// * `user_id` - 사용자 ID
+    /// * `mint` - 자산 종류
+    /// * `delta` - 증감량 (양수: 입금, 음수: 출금)
+    /// 
+    /// # 처리 과정
+    /// 1. 잔고 조회 (없으면 0으로 초기화)
+    /// 2. available += delta
+    /// 3. 음수 잔고 방지 (출금 시 잔고 부족 체크는 호출자가 해야 함)
+    /// 
+    /// # 예시
+    /// ```rust
+    /// // 100 USDT 입금
+    /// cache.add_available(123, "USDT", Decimal::new(100, 0));
+    /// 
+    /// // 50 USDT 출금
+    /// cache.add_available(123, "USDT", Decimal::new(-50, 0));
+    /// ```
+    pub fn add_available(&mut self, user_id: u64, mint: &str, delta: Decimal) {
+        let balance = self.get_balance_mut(user_id, mint);
+        balance.available += delta;
+        
+        // 음수 잔고 방지 (안전장치)
+        if balance.available < Decimal::ZERO {
+            balance.available = Decimal::ZERO;
+        }
+    }
+
     /// 모든 잔고 삭제 (벤치마크/테스트 초기화용)
     pub fn clear(&mut self) {
         self.balances.clear();
