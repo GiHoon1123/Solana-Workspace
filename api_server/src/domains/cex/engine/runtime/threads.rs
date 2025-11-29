@@ -23,6 +23,7 @@ use crate::domains::cex::engine::executor::Executor;
 use crate::domains::cex::engine::wal::{WalEntry, WalWriter};
 
 use super::commands::OrderCommand;
+use super::balance_commands::BalanceCommand;
 use super::config::CoreConfig;
 
 // =====================================================
@@ -42,30 +43,46 @@ use super::config::CoreConfig;
 /// 
 /// # Arguments
 /// * `order_rx` - 주문 명령 수신 채널
+/// * `balance_rx` - 잔고 업데이트 명령 수신 채널 (우선순위 높음)
 /// * `wal_tx` - WAL 메시지 전송 채널
+/// * `db_tx` - DB 명령 전송 채널
 /// * `orderbooks` - 거래쌍별 오더북 (공유)
 /// * `matcher` - 매칭 엔진 (공유)
 /// * `executor` - 체결 실행 엔진 (공유)
 /// * `running` - 실행 중 여부 플래그
 /// 
-/// # 처리 흐름
+/// # 처리 흐름 (우선순위 기반)
 /// ```
 /// loop {
-///     order_rx.recv() → OrderCommand
-///         ↓
-///     match OrderCommand {
-///         SubmitOrder → 
-///             1. WAL 메시지 발행
-///             2. OrderBook에 추가
-///             3. Matcher로 매칭
-///             4. Executor로 체결
-///             5. 결과 반환
-///         CancelOrder → ...
-///         GetOrderbook → ...
-///         ...
+///     // 1. 잔고 업데이트 큐 우선 확인 (논블로킹)
+///     match balance_rx.try_recv() {
+///         Ok(cmd) => {
+///             handle_update_balance(cmd);
+///             continue;  // 다음 루프로
+///         }
+///         Err(TryRecvError::Empty) => {
+///             // 큐가 비어있음, 주문 큐 확인
+///         }
+///         Err(TryRecvError::Disconnected) => break,
+///     }
+///     
+///     // 2. 주문 큐 확인 (블로킹)
+///     match order_rx.recv() {
+///         Ok(cmd) => {
+///             match cmd {
+///                 SubmitOrder → ...
+///                 CancelOrder → ...
+///                 ...
+///             }
+///         }
+///         Err(_) => break,
 ///     }
 /// }
 /// ```
+/// 
+/// # 우선순위 전략
+/// - 입금 큐 우선: 입금이 선행되어야 주문 가능
+/// - 주문 큐: 입금 큐가 비어있을 때만 처리
 /// 
 /// # 성능
 /// - 주문 처리: < 0.5ms (평균)
@@ -73,6 +90,7 @@ use super::config::CoreConfig;
 /// - TPS: 50,000+ orders/sec
 pub fn engine_thread_loop(
     order_rx: Receiver<OrderCommand>,
+    balance_rx: Receiver<BalanceCommand>,
     wal_tx: Option<crossbeam::channel::Sender<WalEntry>>,
     db_tx: Option<crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     orderbooks: Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
@@ -94,13 +112,65 @@ pub fn engine_thread_loop(
     CoreConfig::set_realtime_scheduling(99);
     
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // 2. 메인 루프
+    // 2. 메인 루프 (우선순위 기반)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     
+    // 채널 닫힘 상태 추적
+    let mut balance_closed = false;
+    let mut order_closed = false;
+    
     loop {
-        // 주문 명령 수신 (블로킹)
-        // 채널이 닫히면 Err를 반환하여 루프가 종료됩니다.
-        match order_rx.recv() {
+        // running 플래그 확인
+        if !running.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        
+        // 두 채널 모두 닫혔으면 종료
+        if balance_closed && order_closed {
+            break;
+        }
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 1. 잔고 업데이트 큐 우선 확인 (논블로킹)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 입금이 선행되어야 주문이 가능하므로 우선순위를 높게 설정
+        if !balance_closed {
+            match balance_rx.try_recv() {
+            Ok(cmd) => {
+                // 잔고 업데이트 처리
+                match cmd {
+                    BalanceCommand::UpdateBalance { user_id, mint, available_delta, response } => {
+                        handle_update_balance(
+                            user_id,
+                            mint,
+                            available_delta,
+                            response,
+                            wal_tx.as_ref(),
+                            db_tx.as_ref(),
+                            &executor,
+                        );
+                    }
+                }
+                continue; // 다음 루프로 (주문 큐 확인 전에 다시 잔고 큐 확인)
+            }
+            Err(crossbeam::channel::TryRecvError::Empty) => {
+                // 큐가 비어있음, 주문 큐 확인
+            }
+                Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                    // balance_rx 채널이 닫힘 (sender가 닫혔음)
+                    balance_closed = true;
+                }
+            }
+        }
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 2. 주문 큐 확인 (타임아웃 사용)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 잔고 큐가 비어있을 때만 주문 처리
+        // 짧은 타임아웃(1ms)을 사용하여 잔고 큐를 주기적으로 확인
+        if !order_closed {
+            use std::time::Duration;
+            match order_rx.recv_timeout(Duration::from_millis(1)) {
             Ok(cmd) => {
                 // running 플래그 확인 (명령 처리 전)
                 if !running.load(std::sync::atomic::Ordering::Relaxed) {
@@ -169,9 +239,98 @@ pub fn engine_thread_loop(
                     }
                 }
             }
-            Err(_) => {
-                // 채널이 닫힘 (정상 종료)
-                break;
+                Err(crossbeam::channel::RecvTimeoutError::Timeout) => {
+                    // 타임아웃: 잔고 큐를 다시 확인하기 위해 루프 계속
+                    // 하지만 balance_closed가 true이면 order_rx도 닫혔는지 확인
+                    if balance_closed {
+                        // balance_rx는 이미 닫혔음, order_rx도 닫혔는지 확인
+                        match order_rx.try_recv() {
+                            Err(crossbeam::channel::TryRecvError::Disconnected) => {
+                                // order_rx도 닫혔음
+                                order_closed = true;
+                                break; // 두 채널 모두 닫혔으므로 종료
+                            }
+                            Ok(cmd) => {
+                                // order_rx에 메시지가 있으면 처리
+                                if !running.load(std::sync::atomic::Ordering::Relaxed) {
+                                    break;
+                                }
+                                match cmd {
+                                    OrderCommand::SubmitOrder { order, response } => {
+                                        handle_submit_order(
+                                            order,
+                                            response,
+                                            wal_tx.as_ref(),
+                                            db_tx.as_ref(),
+                                            &orderbooks,
+                                            &matcher,
+                                            &executor,
+                                        );
+                                    }
+                                    OrderCommand::CancelOrder { order_id, user_id, trading_pair, response } => {
+                                        handle_cancel_order(
+                                            order_id,
+                                            user_id,
+                                            trading_pair,
+                                            response,
+                                            wal_tx.as_ref(),
+                                            &orderbooks,
+                                            &executor,
+                                        );
+                                    }
+                                    OrderCommand::GetOrderbook { trading_pair, depth, response } => {
+                                        handle_get_orderbook(
+                                            trading_pair,
+                                            depth,
+                                            response,
+                                            &orderbooks,
+                                        );
+                                    }
+                                    OrderCommand::GetBalance { user_id, mint, response } => {
+                                        handle_get_balance(
+                                            user_id,
+                                            mint,
+                                            response,
+                                            &executor,
+                                        );
+                                    }
+                                    OrderCommand::LockBalance { user_id, mint, amount, response } => {
+                                        handle_lock_balance(
+                                            user_id,
+                                            mint,
+                                            amount,
+                                            response,
+                                            wal_tx.as_ref(),
+                                            &executor,
+                                        );
+                                    }
+                                    OrderCommand::UnlockBalance { user_id, mint, amount, response } => {
+                                        handle_unlock_balance(
+                                            user_id,
+                                            mint,
+                                            amount,
+                                            response,
+                                            wal_tx.as_ref(),
+                                            &executor,
+                                        );
+                                    }
+                                }
+                                continue;
+                            }
+                            Err(crossbeam::channel::TryRecvError::Empty) => {
+                                // order_rx는 비어있지만 아직 열려있음
+                                continue;
+                            }
+                        }
+                    } else {
+                        continue;
+                    }
+                }
+                Err(crossbeam::channel::RecvTimeoutError::Disconnected) => {
+                    // order_rx 채널이 닫힘 (sender가 닫혔음)
+                    order_closed = true;
+                    continue;
+                }
             }
         }
     }
@@ -722,6 +881,91 @@ fn handle_unlock_balance(
             let _ = response.send(Err(e));
         }
     }
+}
+
+/// UpdateBalance 명령 처리 (입금/출금)
+/// 
+/// # 처리 과정
+/// 1. BalanceCache에서 잔고 조회/생성
+/// 2. available 업데이트 (기존 + delta)
+/// 3. WAL 메시지 발행 (BalanceUpdated)
+/// 4. DB 명령 전송 (UpdateBalance) → DB Writer가 배치로 처리
+/// 5. 성공/실패 결과를 response로 전송
+/// 
+/// # Arguments
+/// * `user_id` - 사용자 ID
+/// * `mint` - 자산 종류 (예: "SOL", "USDT")
+/// * `available_delta` - available 증감량 (양수: 입금, 음수: 출금)
+/// * `response` - 결과를 반환할 oneshot 채널
+/// * `wal_tx` - WAL 메시지 전송 채널
+/// * `db_tx` - DB 명령 전송 채널
+/// * `executor` - Executor (BalanceCache 포함)
+/// 
+/// # 예시
+/// ```rust
+/// // 100 USDT 입금
+/// handle_update_balance(
+///     123,
+///     "USDT".to_string(),
+///     Decimal::new(100, 0),
+///     response,
+///     wal_tx,
+///     db_tx,
+///     &executor,
+/// );
+/// ```
+fn handle_update_balance(
+    user_id: u64,
+    mint: String,
+    available_delta: rust_decimal::Decimal,
+    response: tokio::sync::oneshot::Sender<Result<()>>,
+    wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
+    executor: &Arc<Mutex<Executor>>,
+) {
+    // 1. BalanceCache에서 잔고 업데이트
+    let (new_available, new_locked) = {
+        let mut executor_guard = executor.lock();
+        let balance_cache = executor_guard.balance_cache_mut();
+        
+        // available 업데이트 (delta 추가)
+        balance_cache.add_available(user_id, &mint, available_delta);
+        
+        // 업데이트 후 잔고 조회 (WAL 기록용)
+        let new_balance = balance_cache.get_balance(user_id, &mint)
+            .cloned()
+            .unwrap_or_else(|| crate::domains::cex::engine::balance_cache::Balance::new());
+        
+        (new_balance.available, new_balance.locked)
+    };
+    
+    // 2. WAL 메시지 발행 (BalanceUpdated)
+    // 업데이트 후 잔고를 기록하여 복구 시 정확한 상태 복원 가능
+    if let Some(tx) = wal_tx {
+        let wal_entry = WalEntry::BalanceUpdated {
+            user_id,
+            mint: mint.clone(),
+            available: new_available.to_string(),
+            locked: new_locked.to_string(),
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        };
+        let _ = tx.send(wal_entry);
+    }
+    
+    // 3. DB 명령 전송 (UpdateBalance)
+    // DB Writer 스레드가 배치로 처리 (100개 또는 10ms마다)
+    if let Some(tx) = db_tx {
+        let db_cmd = super::db_commands::DbCommand::UpdateBalance {
+            user_id,
+            mint: mint.clone(),
+            available_delta: Some(available_delta),
+            locked_delta: None,  // 입금/출금은 available만 변경
+        };
+        let _ = tx.send(db_cmd);
+    }
+    
+    // 4. 성공 결과 반환
+    let _ = response.send(Ok(()));
 }
 
 #[cfg(test)]
