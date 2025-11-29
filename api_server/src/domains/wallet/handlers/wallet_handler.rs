@@ -5,7 +5,9 @@ use crate::domains::wallet::models::{
 use crate::shared::services::AppState;
 use crate::shared::middleware::auth::AuthenticatedUser;
 use crate::shared::errors::WalletError;
+use crate::domains::cex::engine::Engine;
 use axum::{extract::{Path, State}, http::StatusCode, Json};
+use rust_decimal::Decimal;
 use std::convert::Into;
 
 /// 지갑 생성 핸들러
@@ -30,12 +32,48 @@ pub async fn create_wallet(
     // JWT 토큰에서 추출한 user_id 사용
     let user_id = authenticated_user.user_id;
 
+    // 1. 지갑 생성
     let wallet = app_state
         .wallet_state
         .wallet_service
         .create_wallet(user_id)
         .await
         .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
+
+    // 2. 모의거래소 초기 잔액 설정
+    // SOL: 1,000,000,000
+    // USDT: 1,000,000,000
+    let engine = app_state.engine.lock().await;
+    
+    // SOL 초기 잔액 설정
+    engine.update_balance(
+        user_id,
+        "SOL",
+        Decimal::new(1_000_000_000, 0),
+    ).await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to set initial SOL balance: {}", e)
+            })),
+        )
+    })?;
+    
+    // USDT 초기 잔액 설정
+    engine.update_balance(
+        user_id,
+        "USDT",
+        Decimal::new(1_000_000_000, 0),
+    ).await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": format!("Failed to set initial USDT balance: {}", e)
+            })),
+        )
+    })?;
 
     Ok(Json(CreateWalletResponse {
         wallet,
