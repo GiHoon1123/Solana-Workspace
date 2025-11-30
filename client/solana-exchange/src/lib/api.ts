@@ -169,8 +169,15 @@ class ApiClient {
     }
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(error.error || `HTTP error! status: ${response.status}`);
+      let errorMessage = `HTTP error! status: ${response.status}`;
+      try {
+        const error = await response.json();
+        errorMessage = error.error || error.message || errorMessage;
+      } catch {
+        // JSON 파싱 실패 시 기본 메시지 사용
+        errorMessage = `HTTP error! status: ${response.status}`;
+      }
+      throw new Error(errorMessage);
     }
 
     return response.json();
@@ -265,6 +272,34 @@ class ApiClient {
       method: 'GET',
     });
   }
+
+  // CEX Positions API
+  async getPositions(): Promise<AllPositionsResponse> {
+    return this.request<AllPositionsResponse>('/api/cex/positions', {
+      method: 'GET',
+    });
+  }
+
+  async getPosition(mint: string): Promise<AssetPositionResponse> {
+    return this.request<AssetPositionResponse>(`/api/cex/positions/${mint}`, {
+      method: 'GET',
+    });
+  }
+
+  // CEX Trades API
+  async getMyTrades(mint?: string, limit?: number, offset?: number): Promise<Trade[]> {
+    const params = new URLSearchParams();
+    if (mint) params.append('mint', mint);
+    if (limit) params.append('limit', limit.toString());
+    if (offset) params.append('offset', offset.toString());
+    
+    const queryString = params.toString();
+    const endpoint = `/api/cex/trades/my${queryString ? `?${queryString}` : ''}`;
+    
+    return this.request<Trade[]>(endpoint, {
+      method: 'GET',
+    });
+  }
 }
 
 // 지갑 관련 타입
@@ -290,6 +325,46 @@ export interface BalanceResponse {
   balance_lamports: number;
   balance_sol: number;
   public_key: string;
+}
+
+// CEX Positions 타입
+export interface AssetPosition {
+  mint: string;
+  current_balance: string;
+  available: string;
+  locked: string;
+  average_entry_price: string | null;
+  total_bought_amount: string;
+  total_bought_cost: string;
+  current_market_price: string | null;
+  current_value: string | null;
+  unrealized_pnl: string | null;
+  unrealized_pnl_percent: string | null;
+  trade_summary: {
+    total_buy_trades: number;
+    total_sell_trades: number;
+    realized_pnl: string;
+  };
+}
+
+export interface AllPositionsResponse {
+  positions: AssetPosition[];
+}
+
+export interface AssetPositionResponse {
+  position: AssetPosition;
+}
+
+// CEX Trades 타입
+export interface Trade {
+  id: number;
+  buy_order_id: number;
+  sell_order_id: number;
+  base_mint: string;
+  quote_mint: string;
+  price: string;
+  amount: string;
+  created_at: string;
 }
 
 export const apiClient = new ApiClient(API_BASE_URL);

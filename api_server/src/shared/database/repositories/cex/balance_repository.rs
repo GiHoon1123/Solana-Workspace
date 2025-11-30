@@ -153,20 +153,22 @@ impl UserBalanceRepository {
             .await
             .context("Failed to update balance")?
         } else if let Some(available_delta) = &update.available_delta {
+            // INSERT ... ON CONFLICT로 레코드가 없으면 생성, 있으면 업데이트
             sqlx::query(
                 r#"
-                UPDATE user_balances
-                SET 
-                    available = available + $1,
-                    updated_at = $2
-                WHERE user_id = $3 AND mint_address = $4
+                INSERT INTO user_balances (user_id, mint_address, available, locked, created_at, updated_at)
+                VALUES ($1, $2, $3, 0, $4, $4)
+                ON CONFLICT (user_id, mint_address) 
+                DO UPDATE SET 
+                    available = user_balances.available + $3,
+                    updated_at = $4
                 RETURNING id, user_id, mint_address, available, locked, created_at, updated_at
                 "#,
             )
-            .bind(available_delta)
-            .bind(Utc::now())
             .bind(user_id as i64)
             .bind(mint_address)
+            .bind(available_delta)
+            .bind(Utc::now())
             .fetch_one(&self.pool)
             .await
             .context("Failed to update balance")?

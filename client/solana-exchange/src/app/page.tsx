@@ -5,6 +5,7 @@ import SolanaChart from '@/components/SolanaChart';
 import OrderPanel from '@/components/OrderPanel';
 import OrderBook from '@/components/OrderBook';
 import TradeHistory from '@/components/TradeHistory';
+import AssetList from '@/components/AssetList';
 
 export default function Home() {
   const [selectedMarket] = useState('SOL/USDT');
@@ -12,6 +13,9 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-gray-900">
       <div className="flex h-[calc(100vh-4rem)] max-w-[1920px] mx-auto">
+        {/* 좌측: 자산 리스트 */}
+        <AssetList />
+
         {/* 중앙: 차트 + 주문 패널 */}
         <div className="flex-1 flex flex-col p-6 gap-6 overflow-hidden">
           {/* 차트 영역 */}

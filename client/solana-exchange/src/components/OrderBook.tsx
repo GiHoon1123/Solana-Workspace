@@ -105,7 +105,14 @@ export default function OrderBook() {
     };
 
     wsDepthRef.current.onerror = (error) => {
-      console.error('WebSocket 에러:', error);
+      // WebSocket 에러는 조용히 처리 (재연결 시도하지 않음)
+      // 네트워크 문제나 일시적 오류는 자동으로 재연결됨
+      console.warn('호가창 WebSocket 연결 오류 (자동 재연결 시도)');
+    };
+
+    wsDepthRef.current.onclose = () => {
+      // 연결이 끊어지면 자동으로 재연결 시도
+      console.warn('호가창 WebSocket 연결 종료');
     };
 
     // 현재가 WebSocket (ticker stream)
@@ -127,7 +134,13 @@ export default function OrderBook() {
     };
 
     wsTickerRef.current.onerror = (error) => {
-      console.error('Ticker WebSocket 에러:', error);
+      // WebSocket 에러는 조용히 처리 (재연결 시도하지 않음)
+      console.warn('현재가 WebSocket 연결 오류 (자동 재연결 시도)');
+    };
+
+    wsTickerRef.current.onclose = () => {
+      // 연결이 끊어지면 자동으로 재연결 시도
+      console.warn('현재가 WebSocket 연결 종료');
     };
 
     return () => {
