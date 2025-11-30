@@ -152,31 +152,15 @@ async fn main() {
         .expect("Failed to initialize database");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ID 생성기 초기화 (DB에서 마지막 ID 읽어오기)
+    // ID 생성기 초기화 (메모리 기반, DB 접근 없음)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     use crate::shared::utils::id_generator::{OrderIdGenerator, TradeIdGenerator};
     
-    // 마지막 주문 ID 조회
-    let last_order_id: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(id), 0) FROM orders"
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap_or(0);
+    // ID 생성기 초기화 (타임스탬프 기반)
+    OrderIdGenerator::initialize();
+    TradeIdGenerator::initialize();
     
-    // 마지막 체결 ID 조회
-    let last_trade_id: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(MAX(id), 0) FROM trades"
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap_or(0);
-    
-    // ID 생성기 초기화
-    OrderIdGenerator::initialize(last_order_id as u64);
-    TradeIdGenerator::initialize(last_trade_id as u64);
-    
-    eprintln!("[Main] ID generators initialized: last_order_id={}, last_trade_id={}", last_order_id, last_trade_id);
+    eprintln!("[Main] ID generators initialized (timestamp-based, no DB access)");
 
     // WebSocket 서버 먼저 생성 (AppState에 필요)
     use std::sync::Arc;

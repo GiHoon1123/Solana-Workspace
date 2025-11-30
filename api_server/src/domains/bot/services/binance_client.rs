@@ -173,7 +173,7 @@ impl BinanceClient {
                 .await
                 .context("Failed to connect to Binance WebSocket")?;
             
-            println!("[Binance Client] Connected to Binance WebSocket: {}", ws_url);
+            // 연결 성공 (로그 제거 - 봇 동작은 조용히)
             
             let (mut _write, mut read) = ws_stream.split();
             
@@ -198,10 +198,8 @@ impl BinanceClient {
                                                 eprintln!("[Binance Client] Receiver dropped, stopping");
                                                 return Ok(());
                                             }
-                                        } else {
-                                            // bids/asks가 비어있음
-                                            eprintln!("[Binance Client] depthUpdate with empty bids/asks (bids={}, asks={})", bids_count, asks_count);
                                         }
+                                        // bids/asks가 비어있으면 무시 (정상 동작)
                                     }
                                 } else {
                                     // event_type이 없으면 초기 스냅샷이거나 다른 형식
@@ -217,14 +215,12 @@ impl BinanceClient {
                                             eprintln!("[Binance Client] Receiver dropped, stopping");
                                             return Ok(());
                                         }
-                                    } else {
-                                        eprintln!("[Binance Client] Snapshot with empty bids/asks (bids={}, asks={})", bids_count, asks_count);
                                     }
+                                    // bids/asks가 비어있으면 무시 (정상 동작)
                                 }
                             }
-                            Err(e) => {
-                                // 파싱 실패 로그 출력 (첫 몇 개만)
-                                eprintln!("[Binance Client] Failed to parse message: {}", e);
+                            Err(_) => {
+                                // 파싱 실패는 무시 (다른 형식의 메시지일 수 있음)
                             }
                         }
                     }

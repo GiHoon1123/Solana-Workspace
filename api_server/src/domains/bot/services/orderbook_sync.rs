@@ -115,39 +115,25 @@ impl OrderbookSync {
     /// 3. 기존 주문 취소
     /// 4. 새 주문 생성
     pub async fn start(&mut self) -> Result<()> {
-        eprintln!("[Orderbook Sync] Starting orderbook synchronization...");
-        
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. 바이낸스 WebSocket 연결
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        eprintln!("[Orderbook Sync] Creating channel for Binance updates...");
         let (update_tx, mut update_rx) = mpsc::unbounded_channel();
         
-        eprintln!("[Orderbook Sync] Starting Binance WebSocket client...");
         self.binance_client
             .start(update_tx)
             .await
             .context("Failed to start Binance WebSocket")?;
         
-        eprintln!("[Orderbook Sync] Binance WebSocket client started, waiting for updates...");
-        
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 2. 오더북 업데이트 수신 루프
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let mut update_count = 0u64;
         while let Some(update) = update_rx.recv().await {
-            update_count += 1;
-            if update_count % 10 == 0 {
-                eprintln!("[Orderbook Sync] Received {} updates from Binance", update_count);
-            }
-            
             if let Err(e) = self.handle_orderbook_update(update).await {
                 eprintln!("[Orderbook Sync] Failed to handle update: {}", e);
                 // 에러가 발생해도 계속 진행
             }
         }
-        
-        eprintln!("[Orderbook Sync] Update channel closed, stopping...");
         Ok(())
     }
 
@@ -173,8 +159,6 @@ impl OrderbookSync {
         let (bids, asks) = BinanceClient::parse_orderbook_update(&update)
             .context("Failed to parse Binance orderbook update")?;
         
-        eprintln!("[Orderbook Sync] Parsed orderbook: bids={}, asks={}", bids.len(), asks.len());
-        
         let config = self.bot_manager.config();
         let depth = config.orderbook_depth;
         let order_quantity = config.order_quantity;
@@ -182,8 +166,6 @@ impl OrderbookSync {
         // 상위 N개만 사용 (참조가 아닌 값으로 복사)
         let top_bids: Vec<_> = bids.iter().take(depth).cloned().collect();
         let top_asks: Vec<_> = asks.iter().take(depth).cloned().collect();
-        
-        eprintln!("[Orderbook Sync] Top bids={}, top asks={}", top_bids.len(), top_asks.len());
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 2. 기존 봇 주문 모두 취소 (user_id 먼저 가져오기)
@@ -220,7 +202,6 @@ impl OrderbookSync {
         // 주문 생성 결과를 먼저 수집 (borrow checker 문제 해결)
         let mut bot1_new_orders = Vec::new();
         if let Some(user_id) = bot1_user_id {
-            eprintln!("[Orderbook Sync] Creating {} buy orders for bot1 (user_id={})", top_bids.len(), user_id);
             for bid in top_bids {
                 let order = self.create_bot_order_internal(
                     user_id,
@@ -234,16 +215,12 @@ impl OrderbookSync {
                     bot1_new_orders.push((bid.price, order.id));
                 }
             }
-            eprintln!("[Orderbook Sync] Created {} buy orders for bot1", bot1_new_orders.len());
-        } else {
-            eprintln!("[Orderbook Sync] bot1_user_id is None, skipping buy orders");
         }
         
         // Bot 2 (매도): 바이낸스 매도 호가와 동일한 지정가 매도 주문
         // 주문 생성 결과를 먼저 수집 (borrow checker 문제 해결)
         let mut bot2_new_orders = Vec::new();
         if let Some(user_id) = bot2_user_id {
-            eprintln!("[Orderbook Sync] Creating {} sell orders for bot2 (user_id={})", top_asks.len(), user_id);
             for ask in top_asks {
                 let order = self.create_bot_order_internal(
                     user_id,
@@ -257,9 +234,6 @@ impl OrderbookSync {
                     bot2_new_orders.push((ask.price, order.id));
                 }
             }
-            eprintln!("[Orderbook Sync] Created {} sell orders for bot2", bot2_new_orders.len());
-        } else {
-            eprintln!("[Orderbook Sync] bot2_user_id is None, skipping sell orders");
         }
         
         // 주문 맵에 추가 (이제 self를 mutable로 빌릴 수 있음)
@@ -290,9 +264,6 @@ impl OrderbookSync {
         let broadcast_asks: Vec<(Decimal, Decimal)> = self.bot2_orders.values()
             .map(|o| (o.price, o.amount))
             .collect();
-        
-        eprintln!("[Orderbook Sync] Broadcasting: bot1_orders={}, bot2_orders={}", 
-                  self.bot1_orders.len(), self.bot2_orders.len());
         
         let symbol = update.symbol.as_deref().unwrap_or("SOLUSDT");
         if let Err(e) = self.ws_server.broadcast_orderbook(
