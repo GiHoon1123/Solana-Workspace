@@ -50,7 +50,8 @@ use crate::domains::cex::models::*;
         crate::domains::cex::handlers::trade_handler::get_latest_price,
         crate::domains::cex::handlers::trade_handler::get_24h_volume,
         crate::domains::cex::handlers::position_handler::get_position,
-        crate::domains::cex::handlers::position_handler::get_all_positions
+        crate::domains::cex::handlers::position_handler::get_all_positions,
+        crate::domains::bot::handlers::bot_handler::delete_bot_data
     ),
     components(schemas(
         QuoteRequest,
@@ -93,7 +94,9 @@ use crate::domains::cex::models::*;
         AssetPosition,
         AssetPositionResponse,
         AllPositionsResponse,
-        TradeSummary
+        TradeSummary,
+        crate::domains::bot::handlers::bot_handler::DeleteBotDataRequest,
+        crate::domains::bot::handlers::bot_handler::DeleteBotDataResponse
     )),
     modifiers(
         &SecurityAddon
@@ -106,7 +109,8 @@ use crate::domains::cex::models::*;
         (name = "CEX Balances", description = "CEX Exchange balance API endpoints"),
         (name = "CEX Orders", description = "CEX Exchange order API endpoints"),
         (name = "CEX Trades", description = "CEX Exchange trade API endpoints"),
-        (name = "CEX Positions", description = "CEX Exchange position API endpoints (P&L, average entry price)")
+        (name = "CEX Positions", description = "CEX Exchange position API endpoints (P&L, average entry price)"),
+        (name = "Bot", description = "Bot management API endpoints (delete bot data)")
     ),
     info(
         title = "Solana API Server",
@@ -147,8 +151,40 @@ async fn main() {
         .await
         .expect("Failed to initialize database");
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // ID 생성기 초기화 (DB에서 마지막 ID 읽어오기)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    use crate::shared::utils::id_generator::{OrderIdGenerator, TradeIdGenerator};
+    
+    // 마지막 주문 ID 조회
+    let last_order_id: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(id), 0) FROM orders"
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap_or(0);
+    
+    // 마지막 체결 ID 조회
+    let last_trade_id: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(id), 0) FROM trades"
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap_or(0);
+    
+    // ID 생성기 초기화
+    OrderIdGenerator::initialize(last_order_id as u64);
+    TradeIdGenerator::initialize(last_trade_id as u64);
+    
+    println!("ID generators initialized: last_order_id={}, last_trade_id={}", last_order_id, last_trade_id);
+
+    // WebSocket 서버 먼저 생성 (AppState에 필요)
+    use std::sync::Arc;
+    use crate::domains::bot::services::WebSocketServer;
+    let ws_server = Arc::new(WebSocketServer::new(100));
+
     // AppState 생성 (모든 Service 초기화)
-    let app_state = AppState::new(db.clone())
+    let app_state = AppState::new(db.clone(), ws_server.clone())
         .expect("Failed to initialize AppState");
     
     // 엔진 시작 (DB에서 데이터 로드 및 스레드 시작)
@@ -159,6 +195,88 @@ async fn main() {
     }
     
     println!("Engine started successfully");
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 봇 초기화 및 오더북 동기화 시작
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    use crate::domains::bot::models::BotConfig;
+    use crate::domains::bot::services::{
+        BotManager, BinanceClient, OrderbookSync,
+    };
+    use crate::domains::cex::services::order_service::OrderService;
+    
+    // 봇 설정 로드
+    let bot_config = BotConfig::from_env();
+    
+    // 봇 관리자 생성 및 초기화
+    let mut bot_manager = BotManager::new(
+        db.clone(),
+        app_state.engine.clone(),
+        bot_config.clone(),
+    );
+    
+    bot_manager.initialize_bots().await
+        .expect("Failed to initialize bots");
+    
+    println!("Bots initialized: bot1@bot.com (buy), bot2@bot.com (sell)");
+    
+    // 바이낸스 클라이언트 생성
+    let binance_client = BinanceClient::new(bot_config.binance_ws_url.clone());
+    
+    // 주문 서비스 생성
+    let order_service = OrderService::new(
+        db.clone(),
+        app_state.engine.clone(),
+    );
+    
+    // 오더북 동기화 서비스 생성
+    let mut orderbook_sync = OrderbookSync::new(
+        bot_manager.clone(),
+        order_service.clone(),
+        binance_client,
+        ws_server.clone(),
+        db.clone(),
+    );
+    
+    // 오더북 동기화 시작 (백그라운드 태스크)
+    let ws_server_clone = ws_server.clone();
+    let bot_config_clone = bot_config.clone();
+    tokio::spawn(async move {
+        // 오더북 업데이트를 주기적으로 WebSocket으로 브로드캐스트
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
+        
+        loop {
+            interval.tick().await;
+            
+            // 봇 오더북 가져오기 (mut 필요)
+            // TODO: orderbook_sync를 Arc<Mutex<>>로 감싸서 공유 가능하게 만들어야 함
+            // 임시로 주석 처리
+            // let bids = orderbook_sync.get_bot1_orderbook();
+            // let asks = orderbook_sync.get_bot2_orderbook();
+            
+            // 임시로 빈 데이터 전송
+            let bids = Vec::new();
+            let asks = Vec::new();
+            
+            // WebSocket으로 브로드캐스트
+            if let Err(e) = ws_server_clone.broadcast_orderbook(
+                bids,
+                asks,
+                &bot_config_clone.binance_symbol,
+            ).await {
+                eprintln!("[Bot] Failed to broadcast orderbook: {}", e);
+            }
+        }
+    });
+    
+    // 오더북 동기화 시작 (백그라운드 태스크)
+    tokio::spawn(async move {
+        if let Err(e) = orderbook_sync.start().await {
+            eprintln!("[Bot] Orderbook sync error: {}", e);
+        }
+    });
+    
+    println!("Bot orderbook synchronization started");
 
     // CORS 설정
     let cors = CorsLayer::new()
@@ -186,6 +304,9 @@ async fn main() {
         )
         .layer(cors)
         .with_state(app_state);
+    
+    // WebSocket 서버를 AppState에 추가해야 하는데, 일단 전역으로 사용
+    // TODO: AppState에 WebSocket 서버 추가
 
     // 서버 시작: 3002 포트에서 리스닝
     let listener = TcpListener::bind("0.0.0.0:3002")

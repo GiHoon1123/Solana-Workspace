@@ -6,6 +6,7 @@ use crate::domains::swap::services::state::SwapState;
 use crate::domains::cex::services::state::CexState;
 use crate::domains::cex::engine::runtime::HighPerformanceEngine;
 use crate::domains::auth::services::JwtService;
+use crate::domains::bot::services::websocket_server::WebSocketServer;
 use anyhow::Result;
 use tokio::sync::Mutex;
 
@@ -16,6 +17,9 @@ use tokio::sync::Mutex;
 /// 각 도메인의 State를 조합하여 전체 애플리케이션 상태를 관리
 #[derive(Clone)]
 pub struct AppState {
+    /// 데이터베이스 연결 (공유)
+    /// Database connection (shared)
+    pub db: Database,
     pub auth_state: AuthState,
     pub wallet_state: WalletState,
     pub swap_state: SwapState,
@@ -23,12 +27,15 @@ pub struct AppState {
     /// 엔진 인스턴스 (시작/정지용)
     /// Engine instance (for start/stop)
     pub engine: Arc<Mutex<HighPerformanceEngine>>,
+    /// WebSocket 서버 (오더북 브로드캐스트)
+    /// WebSocket server (orderbook broadcast)
+    pub bot_ws_server: Arc<WebSocketServer>,
 }
 
 impl AppState {
     /// Create AppState with database
     /// 모든 도메인 State를 초기화하고 조합
-    pub fn new(db: Database) -> Result<Self> {
+    pub fn new(db: Database, bot_ws_server: Arc<WebSocketServer>) -> Result<Self> {
         // 1. 공유 서비스 생성 (JWT 등)
         let jwt_secret = std::env::var("JWT_SECRET")
             .unwrap_or_else(|_| "your-secret-key-change-in-production".to_string());
@@ -49,11 +56,13 @@ impl AppState {
         
         // 3. AppState 조합
         Ok(Self {
+            db: db.clone(),
             auth_state,
             wallet_state,
             swap_state,
             cex_state,
             engine,
+            bot_ws_server,
         })
     }
 }

@@ -9,6 +9,7 @@ bench_mode = []
 [dependencies]
 axum = "0.7"
 tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat", "io"] }
 tower = "0.4"
 tower-http = { version = "0.5", features = ["cors"] }
 
@@ -69,6 +70,13 @@ nix = { version = "0.27", features = ["sched"] }
 
 # 벤치마크 (TPS 측정)
 criterion = { version = "0.5", features = ["html_reports"] }
+
+# WebSocket (바이낸스 클라이언트 및 프론트엔드 서버)
+tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
+futures-util = "0.3"
+url = "2.5"
+hyper = { version = "1.0", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 
 [dev-dependencies]
 # 테스트용

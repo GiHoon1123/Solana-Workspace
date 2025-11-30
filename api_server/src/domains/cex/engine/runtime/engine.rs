@@ -431,8 +431,6 @@ impl HighPerformanceEngine {
                 .await
                 .context("Failed to load balances from database")?;
 
-            eprintln!("[Engine Start] Found {} balances in database", all_balances.len());
-
             {
                 // 잔고 로드: locked는 0으로 초기화 (활성 주문 기반으로 재계산)
                 let mut executor = self.executor.lock();
@@ -444,10 +442,6 @@ impl HighPerformanceEngine {
                         balance.available + balance.locked, // available + locked를 available로 합침
                         rust_decimal::Decimal::ZERO, // locked는 0으로 초기화
                     );
-                    eprintln!(
-                        "[Engine Start] Loaded balance: user_id={}, mint={}, available={}, locked=0 (will recalculate from active orders)",
-                        balance.user_id, balance.mint_address, balance.available + balance.locked
-                    );
                 }
             }
 
@@ -456,8 +450,6 @@ impl HighPerformanceEngine {
                 .get_all_active_orders()
                 .await
                 .context("Failed to load active orders from database")?;
-
-            eprintln!("[Engine Start] Found {} active orders in database", active_orders.len());
 
             // 활성 주문을 오더북에 추가하고 잔고 잠금 재계산
             {
@@ -474,19 +466,8 @@ impl HighPerformanceEngine {
                         let orderbook =
                             orderbooks.entry(pair).or_insert_with(move || OrderBook::new(pair_clone));
                         orderbook.add_order(entry.clone());
-                        eprintln!(
-                            "[Engine Start] Added limit order to orderbook: order_id={}, user_id={}, type={}, price={:?}",
-                            order.id, order.user_id, order.order_type, entry.price
-                        );
-                    } else if order.order_side == "market" {
-                        // 시장가 주문이 활성 상태로 남아있다는 것은 데이터 불일치
-                        // 시장가 주문은 즉시 체결되거나 취소되어야 하므로 오더북에 추가하지 않음
-                        eprintln!(
-                            "[Engine Start] Warning: Market order found in active orders (data inconsistency): order_id={}, user_id={}, status={}, filled={}/{}",
-                            order.id, order.user_id, order.status, order.filled_amount, order.amount
-                        );
-                        // 시장가 주문은 잔고 잠금만 재계산 (오더북에는 추가하지 않음)
                     }
+                    // 시장가 주문은 오더북에 추가하지 않음 (즉시 체결되어야 하므로)
                     
                     // 모든 활성 주문에 대해 잔고 잠금 재계산 (지정가/시장가 모두)
                     let (lock_mint, lock_amount) = if order.order_type == "buy" {
@@ -504,18 +485,13 @@ impl HighPerformanceEngine {
                         (&order.base_mint, entry.remaining_amount)
                     };
                     
-                    // 잔고 잠금 (에러 발생 시 로그만 출력하고 계속 진행)
+                    // 잔고 잠금 (에러 발생 시 에러 로그만 출력하고 계속 진행)
                     if let Err(e) = executor.lock_balance_for_order(order.id, order.user_id, lock_mint, lock_amount) {
                         eprintln!(
-                            "[Engine Start] Warning: Failed to lock balance for order {}: user_id={}, mint={}, amount={}, error={}",
+                            "[Engine Start] Error: Failed to lock balance for order {}: user_id={}, mint={}, amount={}, error={}",
                             order.id, order.user_id, lock_mint, lock_amount, e
                         );
                         // 잔고 잠금 실패 - 데이터 불일치 가능성 있음
-                    } else {
-                        eprintln!(
-                            "[Engine Start] Locked balance for order {}: user_id={}, mint={}, amount={}",
-                            order.id, order.user_id, lock_mint, lock_amount
-                        );
                     }
                 }
             }

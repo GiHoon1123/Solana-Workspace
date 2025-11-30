@@ -1,6 +1,6 @@
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use crate::shared::database::{Database, OrderRepository};
+use crate::shared::utils::id_generator::OrderIdGenerator;
 use crate::domains::cex::models::order::{Order, CreateOrderRequest};
 use crate::domains::cex::engine::{Engine, TradingPair, OrderEntry, entry_to_order, runtime::HighPerformanceEngine};
 use anyhow::{Context, Result, bail};
@@ -132,18 +132,31 @@ impl OrderService {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 3. 주문 파라미터 준비
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 실제로는 ID 생성기 사용 (Snowflake ID 등)
-        // 지금은 임시로 timestamp 기반 (나중에 개선)
-        let order_id = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        
         // quote_mint 미리 결정 (여러 곳에서 사용되므로)
         let quote_mint = request.quote_mint.unwrap_or_else(|| "USDT".to_string());
 
+        // 시장가 매수: 금액 기반만 지원 (quote_amount 필수, amount는 매칭 시 계산됨)
+        // 지정가 매수/모든 매도: 수량 기반 (amount 필수)
+        let (amount, remaining_amount, quote_amount, remaining_quote_amount) = 
+            if request.order_type == "buy" && request.order_side == "market" {
+                // 시장가 매수 금액 기반: amount는 0으로 시작 (매칭 시 계산됨)
+                let quote_amt = request.quote_amount.unwrap();
+                (Decimal::ZERO, Decimal::ZERO, Some(quote_amt), Some(quote_amt))
+            } else {
+                // 수량 기반 주문 (지정가 매수, 모든 매도)
+                let amt = request.amount.unwrap();
+                (amt, amt, None, None)
+            };
+
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 4. 엔진에 잔고 잠금 요청 (먼저!)
+        // 3. 주문 ID 생성 (ID 생성기 사용)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // ID 생성기로 주문 ID를 미리 생성 (DB 쓰기 전에 ID 확보)
+        // 이렇게 하면 엔진 내부에서 매칭 시 올바른 ID를 사용할 수 있음
+        let order_id = OrderIdGenerator::next();
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 4. 엔진에 잔고 잠금 요청
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 매수: quote_mint (USDT) 잠금
         // 매도: base_mint (SOL 등) 잠금
@@ -159,23 +172,9 @@ impl OrderService {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 5. 엔진에 주문 즉시 제출 (블로킹 없음!)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // OrderEntry 생성 (DB 주문 객체 없이)
-        // 
-        // 시장가 매수: 금액 기반만 지원 (quote_amount 필수, amount는 매칭 시 계산됨)
-        // 지정가 매수/모든 매도: 수량 기반 (amount 필수)
-        let (amount, remaining_amount, quote_amount, remaining_quote_amount) = 
-            if request.order_type == "buy" && request.order_side == "market" {
-                // 시장가 매수 금액 기반: amount는 0으로 시작 (매칭 시 계산됨)
-                let quote_amt = request.quote_amount.unwrap();
-                (Decimal::ZERO, Decimal::ZERO, Some(quote_amt), Some(quote_amt))
-            } else {
-                // 수량 기반 주문 (지정가 매수, 모든 매도)
-                let amt = request.amount.unwrap();
-                (amt, amt, None, None)
-            };
-        
+        // ID 생성기로 생성한 ID 사용
         let order_entry = OrderEntry {
-            id: order_id,
+            id: order_id,  // DB에서 생성된 실제 ID
             user_id,
             order_type: request.order_type.clone(),
             order_side: request.order_side.clone(),
@@ -192,6 +191,7 @@ impl OrderService {
         
         // 엔진에 제출 (즉시 매칭 시도, 마이크로초 단위)
         // 엔진이 내부적으로 WAL 기록 + DB 동기화 처리
+        // 주의: DB에 이미 주문이 있으므로, 엔진의 DB Writer는 InsertOrder를 보내지 않음
         let _matches = {
             let engine_guard = self.engine.lock().await;
             engine_guard
@@ -215,7 +215,7 @@ impl OrderService {
         };
         
         let order = Order {
-            id: order_id,
+            id: order_id,  // ID 생성기로 생성한 ID
             user_id,
             order_type: request.order_type,
             order_side: request.order_side,

@@ -84,14 +84,11 @@ impl Matcher {
         orderbook: &mut OrderBook,
         matches: &mut Vec<MatchResult>,
     ) {
-        // 매도 호가가 비어있으면 매칭 불가
+        // 매도 호가가 비어있으면 매칭 불가 (정상적인 상황 - 매도 주문이 아직 없을 수 있음)
         let best_ask = match orderbook.get_best_ask() {
             Some(price) => price,
             None => {
-                #[cfg(not(feature = "bench_mode"))]
-                {
-                    eprintln!("[Matcher] No ask price available for buy order {}", buy_order.id);
-                }
+                // 매도 호가가 없으면 매칭 불가 (로그 제거 - 정상적인 상황)
                 return; // 매도 호가 없음
             }
         };

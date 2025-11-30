@@ -25,7 +25,6 @@
 use rust_decimal::Decimal;
 use anyhow::{Result, Context as AnyhowContext};
 use chrono::Utc;
-use std::time::{SystemTime, UNIX_EPOCH};
 use crossbeam::channel::Sender;
 use crate::domains::cex::engine::types::MatchResult;
 use crate::domains::cex::engine::balance_cache::BalanceCache;
@@ -183,8 +182,11 @@ impl Executor {
         // ============================================
         // Step 3: DB Writer 채널로 체결 내역 전송 (실시간)
         // ============================================
+        // trade_id는 ID 생성기로 생성
+        use crate::shared::utils::id_generator::TradeIdGenerator;
+        let trade_id = TradeIdGenerator::next();
+        
         if let Some(sender) = &self.db_sender {
-            let trade_id = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos() as u64;
             let cmd = DbCommand::InsertTrade {
                 trade_id,
                 buy_order_id: match_result.buy_order_id,

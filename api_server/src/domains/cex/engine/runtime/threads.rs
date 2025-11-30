@@ -425,9 +425,10 @@ pub(crate) fn process_submit_order(
     }
     
     // 3-1. 주문을 DB에 저장 (배치로 처리됨, trade insert 전에 필요 - 외래키 제약)
+    // 주문 ID는 DB Writer가 INSERT 시 auto increment로 생성됨
     if let Some(tx) = db_tx {
         let db_cmd = super::db_commands::DbCommand::InsertOrder {
-            order_id: order.id,
+            order_id: order.id,  // 임시 ID (0), DB Writer가 실제 ID 생성
             user_id: order.user_id,
             order_type: order.order_type.clone(),
             order_side: order.order_side.clone(),
@@ -1274,6 +1275,21 @@ async fn flush_batch(
     let mut tx = db_pool.begin().await
         .context("Failed to begin transaction")?;
     
+    // 배치 정렬: InsertOrder를 먼저 처리 (외래키 제약조건을 위해)
+    // 1. InsertOrder (주문 먼저 생성)
+    // 2. UpdateOrderStatus (주문 상태 업데이트)
+    // 3. InsertTrade (체결 내역 - 주문이 있어야 함)
+    // 4. UpdateBalance (잔고 업데이트)
+    batch.sort_by(|a, b| {
+        let priority = |cmd: &DbCommand| match cmd {
+            DbCommand::InsertOrder { .. } => 1,
+            DbCommand::UpdateOrderStatus { .. } => 2,
+            DbCommand::InsertTrade { .. } => 3,
+            DbCommand::UpdateBalance { .. } => 4,
+        };
+        priority(a).cmp(&priority(b))
+    });
+    
     // 각 명령 처리
     for cmd in batch.drain(..) {
         match cmd {
@@ -1288,6 +1304,15 @@ async fn flush_batch(
                 amount,
                 created_at,
             } => {
+                // ID 생성기로 생성한 ID를 사용 (auto increment 사용 안 함)
+                // order_id가 0이면 에러 (ID 생성기가 제대로 작동하지 않음)
+                if order_id == 0 {
+                    return Err(anyhow::anyhow!(
+                        "Order ID is 0. ID generator may not be initialized properly."
+                    ));
+                }
+                
+                // 지정된 ID로 INSERT
                 sqlx::query(
                     r#"
                     INSERT INTO orders (
@@ -1295,7 +1320,8 @@ async fn flush_batch(
                         price, amount, filled_amount, status, created_at, updated_at
                     )
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                    ON CONFLICT (id) DO NOTHING
+                    ON CONFLICT (id) DO UPDATE SET
+                        updated_at = $12
                     "#
                 )
                 .bind(order_id as i64)
@@ -1348,6 +1374,16 @@ async fn flush_batch(
                 quote_mint,
                 timestamp,
             } => {
+                // buy_order_id, sell_order_id가 0이면 스킵 (주문이 아직 DB에 INSERT되지 않음)
+                if buy_order_id == 0 || sell_order_id == 0 {
+                    eprintln!(
+                        "[DB Writer] Skipping trade insert: buy_order_id={}, sell_order_id={} (orders not yet inserted)",
+                        buy_order_id, sell_order_id
+                    );
+                    continue;
+                }
+                
+                // ID 생성기로 생성한 trade_id 사용
                 sqlx::query(
                     r#"
                     INSERT INTO trades (
@@ -1370,7 +1406,10 @@ async fn flush_batch(
                 .bind(timestamp)
                 .execute(&mut *tx)
                 .await
-                .context("Failed to insert trade")?;
+                .with_context(|| format!(
+                    "Failed to insert trade: trade_id={}, buy_order_id={}, sell_order_id={}, buyer_id={}, seller_id={}",
+                    trade_id, buy_order_id, sell_order_id, buyer_id, seller_id
+                ))?;
             }
             
             DbCommand::UpdateBalance {

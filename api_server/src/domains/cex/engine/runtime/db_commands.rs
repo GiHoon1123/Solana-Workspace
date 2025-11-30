@@ -60,7 +60,7 @@ pub enum DbCommand {
     /// 체결 내역 저장
     /// 
     /// # Fields
-    /// * `trade_id` - 체결 ID (자동 생성)
+    /// * `trade_id` - 체결 ID (ID 생성기로 생성)
     /// * `buy_order_id` - 매수 주문 ID
     /// * `sell_order_id` - 매도 주문 ID
     /// * `buyer_id` - 매수자 ID
