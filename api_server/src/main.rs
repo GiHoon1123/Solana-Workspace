@@ -162,13 +162,8 @@ async fn main() {
     
     eprintln!("[Main] ID generators initialized (timestamp-based, no DB access)");
 
-    // WebSocket 서버 먼저 생성 (AppState에 필요)
-    use std::sync::Arc;
-    use crate::domains::bot::services::WebSocketServer;
-    let ws_server = Arc::new(WebSocketServer::new(100));
-
     // AppState 생성 (모든 Service 초기화)
-    let app_state = AppState::new(db.clone(), ws_server.clone())
+    let app_state = AppState::new(db.clone())
         .expect("Failed to initialize AppState");
     
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -240,40 +235,8 @@ async fn main() {
         bot_manager.clone(),
         order_service.clone(),
         binance_client,
-        ws_server.clone(),
         db.clone(),
     );
-    
-    // 오더북 동기화 시작 (백그라운드 태스크)
-    let ws_server_clone = ws_server.clone();
-    let bot_config_clone = bot_config.clone();
-    tokio::spawn(async move {
-        // 오더북 업데이트를 주기적으로 WebSocket으로 브로드캐스트
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_millis(100));
-        
-        loop {
-            interval.tick().await;
-            
-            // 봇 오더북 가져오기 (mut 필요)
-            // TODO: orderbook_sync를 Arc<Mutex<>>로 감싸서 공유 가능하게 만들어야 함
-            // 임시로 주석 처리
-            // let bids = orderbook_sync.get_bot1_orderbook();
-            // let asks = orderbook_sync.get_bot2_orderbook();
-            
-            // 임시로 빈 데이터 전송
-            let bids = Vec::new();
-            let asks = Vec::new();
-            
-            // WebSocket으로 브로드캐스트
-            if let Err(e) = ws_server_clone.broadcast_orderbook(
-                bids,
-                asks,
-                &bot_config_clone.binance_symbol,
-            ).await {
-                eprintln!("[Bot] Failed to broadcast orderbook: {}", e);
-            }
-        }
-    });
     
     // 오더북 동기화 시작 (백그라운드 태스크)
     eprintln!("[Main] Starting orderbook synchronization...");
@@ -312,9 +275,6 @@ async fn main() {
         )
         .layer(cors)
         .with_state(app_state);
-    
-    // WebSocket 서버를 AppState에 추가해야 하는데, 일단 전역으로 사용
-    // TODO: AppState에 WebSocket 서버 추가
 
     // 서버 시작: 3002 포트에서 리스닝
     let listener = TcpListener::bind("0.0.0.0:3002")

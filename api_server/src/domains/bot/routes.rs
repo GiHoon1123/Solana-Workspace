@@ -9,6 +9,5 @@ use crate::domains::bot::handlers::bot_handler;
 pub fn create_bot_router() -> Router<AppState> {
     Router::new()
         .route("/data", axum::routing::delete(bot_handler::delete_bot_data))
-        .route("/ws/orderbook", axum::routing::get(bot_handler::handle_websocket))
 }
 

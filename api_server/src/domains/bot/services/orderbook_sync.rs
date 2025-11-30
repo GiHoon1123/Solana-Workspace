@@ -1,11 +1,9 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 use anyhow::{Context, Result};
 use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use crate::domains::bot::services::binance_client::{BinanceClient, BinanceOrderbookUpdate};
 use crate::domains::bot::services::bot_manager::BotManager;
-use crate::domains::bot::services::websocket_server::WebSocketServer;
 use crate::domains::cex::services::order_service::OrderService;
 use crate::domains::cex::models::order::CreateOrderRequest;
 
@@ -37,7 +35,6 @@ struct BotOrder {
 /// 1. 바이낸스 오더북 업데이트 수신
 /// 2. 기존 봇 주문 모두 취소
 /// 3. 새로운 봇 주문 생성 (상위 N개만)
-/// 4. 프론트엔드 WebSocket으로 전송 (별도 서비스)
 /// 
 /// 주의사항:
 /// - bot1은 매수 전용, bot2는 매도 전용
@@ -51,9 +48,6 @@ pub struct OrderbookSync {
     
     /// 바이낸스 클라이언트
     binance_client: BinanceClient,
-    
-    /// WebSocket 서버 (프론트엔드로 오더북 브로드캐스트)
-    ws_server: Arc<WebSocketServer>,
     
     /// 봇 1 (매수)의 활성 주문 추적
     /// Bot 1 (buy) active orders tracking
@@ -77,7 +71,6 @@ impl OrderbookSync {
     /// * `bot_manager` - 봇 관리자
     /// * `order_service` - 주문 서비스
     /// * `binance_client` - 바이낸스 클라이언트
-    /// * `ws_server` - WebSocket 서버 (프론트엔드로 오더북 브로드캐스트)
     /// * `db` - 데이터베이스 연결
     /// 
     /// # Returns
@@ -86,14 +79,12 @@ impl OrderbookSync {
         bot_manager: BotManager,
         order_service: OrderService,
         binance_client: BinanceClient,
-        ws_server: Arc<WebSocketServer>,
         db: crate::shared::database::Database,
     ) -> Self {
         Self {
             bot_manager,
             order_service,
             binance_client,
-            ws_server,
             bot1_orders: HashMap::new(),
             bot2_orders: HashMap::new(),
             db,
@@ -255,25 +246,6 @@ impl OrderbookSync {
             });
         }
         
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 4. 프론트엔드 WebSocket으로 오더북 브로드캐스트
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let broadcast_bids: Vec<(Decimal, Decimal)> = self.bot1_orders.values()
-            .map(|o| (o.price, o.amount))
-            .collect();
-        let broadcast_asks: Vec<(Decimal, Decimal)> = self.bot2_orders.values()
-            .map(|o| (o.price, o.amount))
-            .collect();
-        
-        let symbol = update.symbol.as_deref().unwrap_or("SOLUSDT");
-        if let Err(e) = self.ws_server.broadcast_orderbook(
-            broadcast_bids,
-            broadcast_asks,
-            symbol,
-        ).await {
-            eprintln!("[Orderbook Sync] Failed to broadcast orderbook: {}", e);
-        }
-        
         Ok(())
     }
 
@@ -323,42 +295,5 @@ impl OrderbookSync {
         }
     }
 
-    /// 봇 1 (매수) 오더북 가져오기
-    /// Get bot 1 (buy) orderbook
-    /// 
-    /// 프론트엔드 WebSocket으로 전송하기 위한 오더북 데이터를 생성합니다.
-    /// 
-    /// # Returns
-    /// * `Vec<(price, quantity)>` - 매수 호가 리스트 (가격 내림차순)
-    pub fn get_bot1_orderbook(&self) -> Vec<(Decimal, Decimal)> {
-        let mut entries: Vec<_> = self.bot1_orders
-            .iter()
-            .map(|(_, order)| (order.price, order.amount))
-            .collect();
-        
-        // 가격 내림차순 정렬 (높은 가격부터)
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
-        
-        entries
-    }
-
-    /// 봇 2 (매도) 오더북 가져오기
-    /// Get bot 2 (sell) orderbook
-    /// 
-    /// 프론트엔드 WebSocket으로 전송하기 위한 오더북 데이터를 생성합니다.
-    /// 
-    /// # Returns
-    /// * `Vec<(price, quantity)>` - 매도 호가 리스트 (가격 오름차순)
-    pub fn get_bot2_orderbook(&self) -> Vec<(Decimal, Decimal)> {
-        let mut entries: Vec<_> = self.bot2_orders
-            .iter()
-            .map(|(_, order)| (order.price, order.amount))
-            .collect();
-        
-        // 가격 오름차순 정렬 (낮은 가격부터)
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-        
-        entries
-    }
 }
 

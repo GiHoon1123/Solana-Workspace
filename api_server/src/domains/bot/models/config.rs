@@ -54,7 +54,7 @@ impl Default for BotConfig {
             bot2_email: "bot2@bot.com".to_string(),
             bot2_password: "123123".to_string(),
             order_quantity: Decimal::new(1, 0), // 1.0 SOL
-            orderbook_depth: 50,
+            orderbook_depth: 200, // 상위 200개 호가 처리
             binance_ws_url: "wss://stream.binance.com:9443/ws/solusdt@depth20@100ms".to_string(),
             binance_symbol: "SOLUSDT".to_string(),
         }
@@ -76,7 +76,7 @@ impl BotConfig {
         let orderbook_depth = std::env::var("BOT_ORDERBOOK_DEPTH")
             .ok()
             .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(50);
+            .unwrap_or(200); // 기본값: 200개
         
         Self {
             bot1_email: std::env::var("BOT1_EMAIL")

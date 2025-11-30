@@ -1,5 +1,4 @@
-use axum::{extract::{State, ws::{WebSocketUpgrade, Message as WsMessage}}, Json, response::IntoResponse};
-use futures_util::{SinkExt, StreamExt};
+use axum::{extract::State, Json, response::IntoResponse};
 use utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
@@ -144,87 +143,5 @@ pub async fn delete_bot_data(
             request.bot_email
         ),
     })).into_response()
-}
-
-/// WebSocket 핸들러
-/// WebSocket handler for orderbook updates
-/// 
-/// 프론트엔드에서 오더북 WebSocket 연결을 처리합니다.
-/// 
-/// # WebSocket 주소
-/// `ws://localhost:3002/api/bot/ws/orderbook`
-/// 
-/// # 메시지 형식
-/// 바이낸스 depth stream과 동일한 형식:
-/// ```json
-/// {
-///   "e": "depthUpdate",
-///   "E": 1234567890,
-///   "s": "SOLUSDT",
-///   "U": 1,
-///   "u": 1,
-///   "b": [["136.60", "1.0"], ...],
-///   "a": [["136.70", "1.0"], ...]
-/// }
-/// ```
-pub async fn handle_websocket(
-    State(app_state): State<AppState>,
-    ws: WebSocketUpgrade,
-) -> axum::response::Response {
-    let ws_server = app_state.bot_ws_server.clone();
-    
-    // Axum의 WebSocketUpgrade를 사용하여 WebSocket 연결 처리
-    ws.on_upgrade(move |socket| async move {
-        let (mut sender, mut receiver) = socket.split();
-        let mut rx = ws_server.update_tx.subscribe();
-        
-        // 오더북 업데이트를 클라이언트로 전송하는 태스크
-        let mut send_task = tokio::spawn(async move {
-            while let Ok(msg) = rx.recv().await {
-                let json = match serde_json::to_string(&msg) {
-                    Ok(json) => json,
-                    Err(e) => {
-                        eprintln!("[WebSocket Handler] Failed to serialize message: {}", e);
-                        continue;
-                    }
-                };
-                
-                if sender.send(WsMessage::Text(json)).await.is_err() {
-                    // 클라이언트 연결 끊어짐
-                    break;
-                }
-            }
-        });
-        
-        // 클라이언트로부터 메시지 수신 태스크 (Ping/Pong 처리)
-        let mut recv_task = tokio::spawn(async move {
-            while let Some(Ok(msg)) = receiver.next().await {
-                match msg {
-                    WsMessage::Close(_) => {
-                        // 클라이언트가 연결 종료
-                        break;
-                    }
-                    WsMessage::Ping(data) => {
-                        // Ping에 대한 Pong 응답
-                        // sender는 send_task에서 사용 중이므로, 여기서는 처리하지 않음
-                        // Axum의 WebSocket은 자동으로 Pong을 처리합니다
-                    }
-                    _ => {
-                        // 다른 메시지는 무시 (필요시 처리)
-                    }
-                }
-            }
-        });
-        
-        // 둘 중 하나가 종료되면 전체 종료
-        tokio::select! {
-            _ = (&mut send_task) => {
-                recv_task.abort();
-            }
-            _ = (&mut recv_task) => {
-                send_task.abort();
-            }
-        };
-    })
 }
 
