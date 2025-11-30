@@ -7,8 +7,16 @@ export default function AssetList() {
   const [positions, setPositions] = useState<AssetPosition[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Hydration 에러 방지: 클라이언트에서만 렌더링
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
+    if (!isMounted) return;
+
     const fetchPositions = async () => {
       if (!apiClient.isAuthenticated()) {
         setLoading(false);
@@ -18,8 +26,62 @@ export default function AssetList() {
       try {
         setLoading(true);
         setError(null);
-        const response = await apiClient.getPositions();
-        setPositions(response.positions);
+        
+        // 먼저 positions API 시도, 실패하면 balances API 사용
+        try {
+          const response = await apiClient.getPositions();
+          
+          // USDT를 최상단에 고정
+          const sortedPositions = response.positions.sort((a, b) => {
+            if (a.mint === 'USDT') return -1;
+            if (b.mint === 'USDT') return 1;
+            return a.mint.localeCompare(b.mint); // 나머지는 알파벳 순
+          });
+          
+          setPositions(sortedPositions);
+        } catch (positionsError) {
+          // positions API가 404면 balances API로 폴백
+          if (positionsError instanceof Error && positionsError.message.includes('404')) {
+            console.log('Positions API를 사용할 수 없어 Balances API로 전환합니다.');
+            const balancesResponse = await apiClient.getBalances();
+            
+            // balances를 positions 형식으로 변환 (USDT 포함)
+            const convertedPositions: AssetPosition[] = balancesResponse.balances
+              .map(b => ({
+                mint: b.mint_address,
+                current_balance: (parseFloat(b.available) + parseFloat(b.locked)).toString(),
+                available: b.available,
+                locked: b.locked,
+                average_entry_price: null,
+                total_bought_amount: '0',
+                total_bought_cost: '0',
+                // USDT는 가격이 항상 1 USDT = 1 USDT
+                current_market_price: b.mint_address === 'USDT' ? '1' : null,
+                // USDT는 평가액 = 잔액 (1:1)
+                current_value: b.mint_address === 'USDT' 
+                  ? (parseFloat(b.available) + parseFloat(b.locked)).toString()
+                  : null,
+                unrealized_pnl: null,
+                unrealized_pnl_percent: null,
+                trade_summary: {
+                  total_buy_trades: 0,
+                  total_sell_trades: 0,
+                  realized_pnl: '0',
+                },
+              }));
+            
+            // USDT를 최상단에 고정
+            const sortedPositions = convertedPositions.sort((a, b) => {
+              if (a.mint === 'USDT') return -1;
+              if (b.mint === 'USDT') return 1;
+              return a.mint.localeCompare(b.mint); // 나머지는 알파벳 순
+            });
+            
+            setPositions(sortedPositions);
+          } else {
+            throw positionsError;
+          }
+        }
       } catch (err) {
         console.error('자산 내역 로딩 실패:', err);
         let errorMessage = '자산 내역 로딩 실패';
@@ -30,8 +92,6 @@ export default function AssetList() {
           // 401 에러는 인증 문제
           if (err.message.includes('401') || err.message.includes('Unauthorized')) {
             errorMessage = '인증이 필요합니다. 다시 로그인해주세요.';
-          } else if (err.message.includes('404')) {
-            errorMessage = '자산 내역을 찾을 수 없습니다.';
           } else if (err.message.includes('500')) {
             errorMessage = '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.';
           } else if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
@@ -39,14 +99,7 @@ export default function AssetList() {
           }
         }
         
-        // 에러가 있으면 표시, 없으면 빈 배열로 설정 (자산이 없는 경우)
-        if (errorMessage && !errorMessage.includes('404')) {
-          setError(errorMessage);
-        } else {
-          // 404나 자산이 없는 경우는 에러로 표시하지 않음
-          setPositions([]);
-          setError(null);
-        }
+        setError(errorMessage);
       } finally {
         setLoading(false);
       }
@@ -58,7 +111,7 @@ export default function AssetList() {
     const interval = setInterval(fetchPositions, 5000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [isMounted]);
 
   const formatNumber = (value: string | null | undefined, decimals: number = 2): string => {
     if (!value) return '--';
@@ -74,6 +127,17 @@ export default function AssetList() {
     return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
 
+  // Hydration 에러 방지: 클라이언트 마운트 전에는 빈 div 반환
+  if (!isMounted) {
+    return (
+      <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
+        <div className="p-4 border-b border-gray-700 flex-shrink-0">
+          <h3 className="text-base font-semibold text-white">자산 내역</h3>
+        </div>
+      </div>
+    );
+  }
+
   if (!apiClient.isAuthenticated()) {
     return (
       <div className="w-64 bg-gray-800 border-r border-gray-700 p-4 flex items-center justify-center">
@@ -84,8 +148,10 @@ export default function AssetList() {
 
   if (loading) {
     return (
-      <div className="w-64 bg-gray-800 border-r border-gray-700 p-4">
-        <h3 className="text-base font-semibold text-white mb-4">자산 내역</h3>
+      <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
+        <div className="p-4 border-b border-gray-700 flex-shrink-0">
+          <h3 className="text-base font-semibold text-white">자산 내역</h3>
+        </div>
         <div className="text-gray-400 text-center py-4 text-sm">로딩 중...</div>
       </div>
     );
@@ -93,9 +159,11 @@ export default function AssetList() {
 
   if (error) {
     return (
-      <div className="w-64 bg-gray-800 border-r border-gray-700 p-4">
-        <h3 className="text-base font-semibold text-white mb-4">자산 내역</h3>
-        <div className="text-red-400 text-center py-4 text-sm">{error}</div>
+      <div className="w-64 bg-gray-800 border-r border-gray-700 flex flex-col h-full">
+        <div className="p-4 border-b border-gray-700 flex-shrink-0">
+          <h3 className="text-base font-semibold text-white">자산 내역</h3>
+        </div>
+        <div className="text-red-400 text-center py-4 text-sm px-4">{error}</div>
       </div>
     );
   }

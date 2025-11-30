@@ -280,6 +280,21 @@ class ApiClient {
     });
   }
 
+  // CEX Balances API (폴백용)
+  async getBalances(): Promise<{ balances: Array<{
+    mint_address: string;
+    available: string;
+    locked: string;
+  }> }> {
+    return this.request<{ balances: Array<{
+      mint_address: string;
+      available: string;
+      locked: string;
+    }> }>('/api/cex/balances', {
+      method: 'GET',
+    });
+  }
+
   async getPosition(mint: string): Promise<AssetPositionResponse> {
     return this.request<AssetPositionResponse>(`/api/cex/positions/${mint}`, {
       method: 'GET',

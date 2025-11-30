@@ -88,7 +88,13 @@ export default function TradeHistory() {
     };
 
     wsRef.current.onerror = (error) => {
-      console.error('WebSocket 에러:', error);
+      // WebSocket 에러는 조용히 처리 (재연결 시도하지 않음)
+      console.warn('체결 내역 WebSocket 연결 오류 (자동 재연결 시도)');
+    };
+
+    wsRef.current.onclose = () => {
+      // 연결이 끊어지면 자동으로 재연결 시도
+      console.warn('체결 내역 WebSocket 연결 종료');
     };
 
     return () => {
