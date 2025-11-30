@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { apiClient, Balance } from '@/lib/api';
 
 type OrderType = 'buy' | 'sell';
 
@@ -9,6 +10,39 @@ export default function OrderPanel() {
   const [price, setPrice] = useState('');
   const [amount, setAmount] = useState('');
   const [total, setTotal] = useState('');
+  const [balances, setBalances] = useState<Balance[]>([]);
+
+  // 잔액 가져오기
+  useEffect(() => {
+    const fetchBalances = async () => {
+      if (!apiClient.isAuthenticated()) {
+        setBalances([]);
+        return;
+      }
+
+      try {
+        const response = await apiClient.getBalances();
+        if (response.balances && response.balances.length > 0) {
+          setBalances(response.balances);
+        }
+      } catch (error) {
+        console.error('잔액 가져오기 실패:', error);
+      }
+    };
+
+    fetchBalances();
+    const interval = setInterval(fetchBalances, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const getBalance = (mint: string): number => {
+    const balance = balances.find(b => b.mint_address === mint);
+    if (!balance) return 0;
+    return parseFloat(balance.available) || 0;
+  };
+
+  const solBalance = getBalance('SOL');
+  const usdtBalance = getBalance('USDT');
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -49,15 +83,29 @@ export default function OrderPanel() {
   };
 
   const setPercentage = (percent: number) => {
-    // TODO: 실제 잔액 가져오기
-    const balance = 1000; // 임시
-    const calculatedAmount = ((balance * percent) / 100).toFixed(4);
-    setAmount(calculatedAmount);
-    if (price) {
-      const priceNum = parseFloat(price);
-      const amountNum = parseFloat(calculatedAmount);
-      if (!isNaN(priceNum) && !isNaN(amountNum) && priceNum > 0 && amountNum > 0) {
-        setTotal((priceNum * amountNum).toFixed(2));
+    if (orderType === 'buy') {
+      const balance = usdtBalance;
+      if (balance <= 0) return;
+      const calculatedAmount = ((balance * percent) / 100).toFixed(2);
+      if (price) {
+        const priceNum = parseFloat(price);
+        if (priceNum > 0) {
+          setAmount((parseFloat(calculatedAmount) / priceNum).toFixed(4));
+          setTotal(calculatedAmount);
+        }
+      }
+    } else {
+      // 매도
+      const balance = solBalance;
+      if (balance <= 0) return;
+      const calculatedAmount = ((balance * percent) / 100).toFixed(4);
+      setAmount(calculatedAmount);
+      if (price) {
+        const priceNum = parseFloat(price);
+        const amountNum = parseFloat(calculatedAmount);
+        if (!isNaN(priceNum) && !isNaN(amountNum) && priceNum > 0 && amountNum > 0) {
+          setTotal((priceNum * amountNum).toFixed(2));
+        }
       }
     }
   };
@@ -85,6 +133,18 @@ export default function OrderPanel() {
         >
           매도
         </button>
+      </div>
+
+      {/* 잔액 표시 */}
+      <div className="mb-3 pb-3 border-b border-gray-700 flex-shrink-0">
+        <div className="flex justify-between text-xs">
+          <span className="text-gray-400">보유 {orderType === 'buy' ? 'USDT' : 'SOL'}</span>
+          <span className="text-white font-medium">
+            {orderType === 'buy' 
+              ? `${usdtBalance.toFixed(2)} USDT`
+              : `${solBalance.toFixed(4)} SOL`}
+          </span>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col space-y-3 justify-between">

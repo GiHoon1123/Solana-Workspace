@@ -80,73 +80,70 @@ export default function AssetList() {
         }
         setError(null);
         
-        // 먼저 positions API 시도, 실패하면 balances API 사용
+        // balances API를 우선 사용 (USDT 포함 보장)
+        const balancesResponse = await apiClient.getBalances();
+        
+        // positions API에서 추가 정보 가져오기 (손익 등)
+        let positionsData: AssetPosition[] = [];
         try {
-          const response = await apiClient.getPositions();
-          
-          // USDT를 최상단에 고정
-          const sortedPositions = response.positions.sort((a, b) => {
-            if (a.mint === 'USDT') return -1;
-            if (b.mint === 'USDT') return 1;
-            return a.mint.localeCompare(b.mint); // 나머지는 알파벳 순
-          });
-          
-          setPositions(sortedPositions);
+          const positionsResponse = await apiClient.getPositions();
+          positionsData = positionsResponse.positions;
         } catch (positionsError) {
-          // positions API가 404면 balances API로 폴백
-          if (positionsError instanceof Error && positionsError.message.includes('404')) {
-            console.log('Positions API를 사용할 수 없어 Balances API로 전환합니다.');
-            const balancesResponse = await apiClient.getBalances();
-            
-            // balances를 positions 형식으로 변환 (USDT 포함)
-            const convertedPositions: AssetPosition[] = balancesResponse.balances
-              .map(b => {
-                const balance = parseFloat(b.available) + parseFloat(b.locked);
-                
-                // SOL의 경우 바이낸스 가격 사용, USDT는 1, 그 외는 null
-                let marketPrice: string | null = null;
-                let value: string | null = null;
-                
-                if (b.mint_address === 'USDT') {
-                  marketPrice = '1';
-                  value = balance.toString();
-                } else if (b.mint_address === 'SOL' && solPrice) {
-                  marketPrice = solPrice.toString();
-                  value = (solPrice * balance).toString();
-                }
-                
-                return {
-                  mint: b.mint_address,
-                  current_balance: balance.toString(),
-                  available: b.available,
-                  locked: b.locked,
-                  average_entry_price: null,
-                  total_bought_amount: '0',
-                  total_bought_cost: '0',
-                  current_market_price: marketPrice,
-                  current_value: value,
-                  unrealized_pnl: null,
-                  unrealized_pnl_percent: null,
-                  trade_summary: {
-                    total_buy_trades: 0,
-                    total_sell_trades: 0,
-                    realized_pnl: '0',
-                  },
-                };
-              });
-            
-            // USDT를 최상단에 고정
-            const sortedPositions = convertedPositions.sort((a, b) => {
-              if (a.mint === 'USDT') return -1;
-              if (b.mint === 'USDT') return 1;
-              return a.mint.localeCompare(b.mint); // 나머지는 알파벳 순
-            });
-            
-            setPositions(sortedPositions);
-          } else {
-            throw positionsError;
-          }
+          // positions API 실패해도 계속 진행 (balances만 사용)
+          console.log('Positions API를 사용할 수 없어 Balances만 사용합니다.');
         }
+        
+        // balances를 positions 형식으로 변환하고, positions API 데이터와 병합
+        const convertedPositions: AssetPosition[] = balancesResponse.balances
+          .map(b => {
+            const balance = parseFloat(b.available) + parseFloat(b.locked);
+            
+            // positions API에서 해당 mint의 데이터 찾기
+            const positionData = positionsData.find(p => p.mint === b.mint_address);
+            
+            // SOL의 경우 바이낸스 가격 사용, USDT는 1, 그 외는 positions API 가격 사용
+            let marketPrice: string | null = null;
+            let value: string | null = null;
+            
+            if (b.mint_address === 'USDT') {
+              marketPrice = '1';
+              value = balance.toString();
+            } else if (b.mint_address === 'SOL' && solPrice) {
+              marketPrice = solPrice.toString();
+              value = (solPrice * balance).toString();
+            } else if (positionData?.current_market_price) {
+              marketPrice = positionData.current_market_price;
+              value = positionData.current_value || null;
+            }
+            
+            return {
+              mint: b.mint_address,
+              current_balance: balance.toString(),
+              available: b.available,
+              locked: b.locked,
+              average_entry_price: positionData?.average_entry_price || null,
+              total_bought_amount: positionData?.total_bought_amount || '0',
+              total_bought_cost: positionData?.total_bought_cost || '0',
+              current_market_price: marketPrice,
+              current_value: value,
+              unrealized_pnl: positionData?.unrealized_pnl || null,
+              unrealized_pnl_percent: positionData?.unrealized_pnl_percent || null,
+              trade_summary: positionData?.trade_summary || {
+                total_buy_trades: 0,
+                total_sell_trades: 0,
+                realized_pnl: '0',
+              },
+            };
+          });
+        
+        // USDT를 최상단에 고정
+        const sortedPositions = convertedPositions.sort((a, b) => {
+          if (a.mint === 'USDT') return -1;
+          if (b.mint === 'USDT') return 1;
+          return a.mint.localeCompare(b.mint); // 나머지는 알파벳 순
+        });
+        
+        setPositions(sortedPositions);
       } catch (err) {
         console.error('자산 내역 로딩 실패:', err);
         let errorMessage = '자산 내역 로딩 실패';

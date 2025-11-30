@@ -133,7 +133,9 @@ class ApiClient {
       ...options.headers,
     };
 
-    if (accessToken && !endpoint.includes('/auth/')) {
+    // 인증이 필요한 엔드포인트에 Authorization 헤더 추가
+    // /api/auth/signup, /api/auth/signin, /api/auth/refresh, /api/auth/logout은 제외
+    if (accessToken && !endpoint.includes('/auth/signup') && !endpoint.includes('/auth/signin') && !endpoint.includes('/auth/refresh') && !endpoint.includes('/auth/logout')) {
       headers['Authorization'] = `Bearer ${accessToken}`;
     }
 
@@ -281,16 +283,8 @@ class ApiClient {
   }
 
   // CEX Balances API (폴백용)
-  async getBalances(): Promise<{ balances: Array<{
-    mint_address: string;
-    available: string;
-    locked: string;
-  }> }> {
-    return this.request<{ balances: Array<{
-      mint_address: string;
-      available: string;
-      locked: string;
-    }> }>('/api/cex/balances', {
+  async getBalances(): Promise<{ balances: Balance[] }> {
+    return this.request<{ balances: Balance[] }>('/api/cex/balances', {
       method: 'GET',
     });
   }
@@ -368,6 +362,17 @@ export interface AllPositionsResponse {
 
 export interface AssetPositionResponse {
   position: AssetPosition;
+}
+
+// CEX Balances 타입
+export interface Balance {
+  id: number;
+  user_id: number;
+  mint_address: string;
+  available: string;
+  locked: string;
+  created_at: string;
+  updated_at: string;
 }
 
 // CEX Trades 타입
