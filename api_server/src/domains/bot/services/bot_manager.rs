@@ -83,13 +83,20 @@ impl BotManager {
     /// 2. bot2 계정 확인/생성
     /// 3. bot1 자산 설정
     /// 4. bot2 자산 설정
-    pub async fn initialize_bots(&mut self) -> Result<()> {
+    /// 봇 계정 확인/생성 및 데이터 삭제 (엔진 시작 전)
+    /// Ensure bot accounts and delete previous data (before engine start)
+    /// 
+    /// 엔진이 필요하지 않은 작업만 수행합니다.
+    pub async fn prepare_bots(&mut self) -> Result<()> {
+        eprintln!("[Bot Manager] Preparing bots (account creation and data cleanup)...");
+        
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 1. 봇 계정 확인/생성
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         let auth_service = AuthService::new(self.db.clone());
         
         // Bot 1 (매수 전용) 계정 확인/생성
+        eprintln!("[Bot Manager] Ensuring bot1 account: {}", self.config.bot1_email);
         let bot1 = self.ensure_bot_account(
             &auth_service,
             &self.config.bot1_email,
@@ -99,6 +106,7 @@ impl BotManager {
         .context("Failed to ensure bot1 account")?;
         
         // Bot 2 (매도 전용) 계정 확인/생성
+        eprintln!("[Bot Manager] Ensuring bot2 account: {}", self.config.bot2_email);
         let bot2 = self.ensure_bot_account(
             &auth_service,
             &self.config.bot2_email,
@@ -110,23 +118,119 @@ impl BotManager {
         self.bot1_user = Some(bot1.clone());
         self.bot2_user = Some(bot2.clone());
         
+        eprintln!("[Bot Manager] Bot accounts ready: bot1_id={}, bot2_id={}", bot1.id, bot2.id);
+        
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 2. 봇 자산 설정 (무한대에 가까운 SOL/USDT)
+        // 2. 서버 재시작 시 이전 봇 데이터 모두 삭제
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        eprintln!("[Bot Manager] Deleting all previous bot data (orders and trades)...");
+        self.delete_all_bot_data(bot1.id).await
+            .context("Failed to delete bot1 data")?;
+        self.delete_all_bot_data(bot2.id).await
+            .context("Failed to delete bot2 data")?;
+        
+        eprintln!("[Bot Manager] Bot preparation completed");
+        Ok(())
+    }
+    
+    /// 봇 잔고 설정 (엔진 시작 후)
+    /// Set bot balances (after engine start)
+    /// 
+    /// 엔진이 시작된 후에 호출해야 합니다.
+    pub async fn initialize_bots(&mut self) -> Result<()> {
+        eprintln!("[Bot Manager] Setting bot balances...");
+        
+        let bot1_id = self.bot1_user.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Bot1 not initialized"))?
+            .id;
+        let bot2_id = self.bot2_user.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Bot2 not initialized"))?
+            .id;
+        
         // 1,000,000,000 SOL, 1,000,000,000 USDT
         let huge_balance = Decimal::new(1_000_000_000, 0);
         
+        eprintln!("[Bot Manager] Setting balances for bot1 (user_id={}): SOL={}, USDT={}", 
+                  bot1_id, huge_balance, huge_balance);
+        
         // Bot 1 자산 설정
-        self.set_bot_balance(bot1.id, "SOL", huge_balance).await
+        self.set_bot_balance(bot1_id, "SOL", huge_balance).await
             .context("Failed to set bot1 SOL balance")?;
-        self.set_bot_balance(bot1.id, "USDT", huge_balance).await
+        self.set_bot_balance(bot1_id, "USDT", huge_balance).await
             .context("Failed to set bot1 USDT balance")?;
         
+        eprintln!("[Bot Manager] Setting balances for bot2 (user_id={}): SOL={}, USDT={}", 
+                  bot2_id, huge_balance, huge_balance);
+        
         // Bot 2 자산 설정
-        self.set_bot_balance(bot2.id, "SOL", huge_balance).await
+        self.set_bot_balance(bot2_id, "SOL", huge_balance).await
             .context("Failed to set bot2 SOL balance")?;
-        self.set_bot_balance(bot2.id, "USDT", huge_balance).await
+        self.set_bot_balance(bot2_id, "USDT", huge_balance).await
             .context("Failed to set bot2 USDT balance")?;
+        
+        eprintln!("[Bot Manager] Bot initialization completed successfully");
+        Ok(())
+    }
+    
+    /// 봇 계정의 모든 데이터 삭제 (주문 및 거래)
+    /// Delete all bot data (orders and trades)
+    /// 
+    /// 서버 재시작 시 이전에 생성된 봇 주문과 거래를 완전히 삭제합니다.
+    /// 엔진 시작 전에 실행되므로 DB에서 직접 삭제합니다.
+    /// 
+    /// # 처리 순서
+    /// 1. 봇이 참여한 거래 삭제 (foreign key 제약 때문에 먼저)
+    /// 2. 봇의 모든 주문 삭제
+    async fn delete_all_bot_data(&self, user_id: u64) -> Result<()> {
+        // 1. 봇의 주문 ID 목록 조회 (거래 삭제를 위해 필요)
+        let order_ids: Vec<i64> = sqlx::query_scalar(
+            r#"
+            SELECT id FROM orders WHERE user_id = $1
+            "#,
+        )
+        .bind(user_id as i64)
+        .fetch_all(self.db.pool())
+        .await
+        .context("Failed to fetch bot order IDs")?;
+        
+        let order_count = order_ids.len();
+        let mut trade_count = 0u64;
+        
+        // 2. 봇이 참여한 거래 삭제 (foreign key 제약 때문에 먼저 삭제)
+        if !order_ids.is_empty() {
+            let deleted_trades = sqlx::query(
+                r#"
+                DELETE FROM trades
+                WHERE buy_order_id = ANY($1) OR sell_order_id = ANY($1)
+                RETURNING id
+                "#,
+            )
+            .bind(&order_ids)
+            .fetch_all(self.db.pool())
+            .await
+            .context("Failed to delete bot trades")?;
+            
+            trade_count = deleted_trades.len() as u64;
+        }
+        
+        // 3. 봇의 모든 주문 삭제
+        if order_count > 0 {
+            let deleted_orders = sqlx::query(
+                r#"
+                DELETE FROM orders WHERE user_id = $1
+                RETURNING id
+                "#,
+            )
+            .bind(user_id as i64)
+            .execute(self.db.pool())
+            .await
+            .context("Failed to delete bot orders")?;
+            
+            eprintln!("[Bot Manager] Deleted {} orders and {} trades for user_id={}", 
+                     deleted_orders.rows_affected(), trade_count, user_id);
+        } else {
+            eprintln!("[Bot Manager] No bot data found for user_id={}", user_id);
+        }
         
         Ok(())
     }

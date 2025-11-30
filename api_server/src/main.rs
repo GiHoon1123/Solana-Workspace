@@ -176,7 +176,7 @@ async fn main() {
     OrderIdGenerator::initialize(last_order_id as u64);
     TradeIdGenerator::initialize(last_trade_id as u64);
     
-    println!("ID generators initialized: last_order_id={}, last_trade_id={}", last_order_id, last_trade_id);
+    eprintln!("[Main] ID generators initialized: last_order_id={}, last_trade_id={}", last_order_id, last_trade_id);
 
     // WebSocket 서버 먼저 생성 (AppState에 필요)
     use std::sync::Arc;
@@ -187,18 +187,11 @@ async fn main() {
     let app_state = AppState::new(db.clone(), ws_server.clone())
         .expect("Failed to initialize AppState");
     
-    // 엔진 시작 (DB에서 데이터 로드 및 스레드 시작)
-    {
-        let mut engine_guard = app_state.engine.lock().await;
-        engine_guard.start().await
-            .expect("Failed to start engine");
-    }
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 봇 준비 (엔진 시작 전 - 계정 생성 및 데이터 삭제)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("[Main] Preparing bots (before engine start)...");
     
-    println!("Engine started successfully");
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // 봇 초기화 및 오더북 동기화 시작
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     use crate::domains::bot::models::BotConfig;
     use crate::domains::bot::services::{
         BotManager, BinanceClient, OrderbookSync,
@@ -206,19 +199,48 @@ async fn main() {
     use crate::domains::cex::services::order_service::OrderService;
     
     // 봇 설정 로드
+    eprintln!("[Main] Loading bot config from environment...");
     let bot_config = BotConfig::from_env();
+    eprintln!("[Main] Bot config loaded: ws_url={}, symbol={}, depth={}, quantity={}", 
+              bot_config.binance_ws_url, bot_config.binance_symbol, 
+              bot_config.orderbook_depth, bot_config.order_quantity);
     
-    // 봇 관리자 생성 및 초기화
+    // 봇 관리자 생성 (엔진 참조는 필요하지만 아직 사용하지 않음)
+    eprintln!("[Main] Creating BotManager...");
     let mut bot_manager = BotManager::new(
         db.clone(),
         app_state.engine.clone(),
         bot_config.clone(),
     );
     
+    // 봇 계정 확인/생성 및 데이터 삭제 (엔진 불필요)
+    eprintln!("[Main] Preparing bots (account creation and data cleanup)...");
+    bot_manager.prepare_bots().await
+        .expect("Failed to prepare bots");
+    
+    eprintln!("[Main] Bots prepared: bot1@bot.com (buy), bot2@bot.com (sell)");
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 엔진 시작 (DB에서 데이터 로드 및 스레드 시작)
+    // 봇 데이터 삭제 후 실행되므로 활성 주문 수가 크게 줄어듭니다
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("[Main] Starting engine (after bot data cleanup)...");
+    {
+        let mut engine_guard = app_state.engine.lock().await;
+        engine_guard.start().await
+            .expect("Failed to start engine");
+    }
+    
+    eprintln!("[Main] Engine started successfully");
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 봇 잔고 설정 (엔진 시작 후)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("[Main] Setting bot balances (after engine start)...");
     bot_manager.initialize_bots().await
         .expect("Failed to initialize bots");
     
-    println!("Bots initialized: bot1@bot.com (buy), bot2@bot.com (sell)");
+    eprintln!("[Main] Bots initialized: bot1@bot.com (buy), bot2@bot.com (sell)");
     
     // 바이낸스 클라이언트 생성
     let binance_client = BinanceClient::new(bot_config.binance_ws_url.clone());
@@ -270,13 +292,15 @@ async fn main() {
     });
     
     // 오더북 동기화 시작 (백그라운드 태스크)
+    eprintln!("[Main] Starting orderbook synchronization...");
     tokio::spawn(async move {
+        eprintln!("[Main] Orderbook sync task started");
         if let Err(e) = orderbook_sync.start().await {
-            eprintln!("[Bot] Orderbook sync error: {}", e);
+            eprintln!("[Main] Orderbook sync error: {}", e);
         }
     });
     
-    println!("Bot orderbook synchronization started");
+    eprintln!("[Main] Bot orderbook synchronization started");
 
     // CORS 설정
     let cors = CorsLayer::new()
@@ -313,9 +337,9 @@ async fn main() {
         .await
         .unwrap();
     
-    println!("Server running on http://localhost:3002");
-    println!("Swagger UI available at http://localhost:3002/api");
-    println!("Database: PostgreSQL (solana_api)");
+    eprintln!("[Main] Server running on http://localhost:3002");
+    eprintln!("[Main] Swagger UI available at http://localhost:3002/api");
+    eprintln!("[Main] Database: PostgreSQL (solana_api)");
     
     // 서버 실행
     axum::serve(listener, app)

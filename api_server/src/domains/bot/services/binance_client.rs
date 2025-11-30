@@ -185,21 +185,28 @@ impl BinanceClient {
                         match serde_json::from_str::<BinanceOrderbookUpdate>(&text) {
                             Ok(update) => {
                                 // "depthUpdate" 이벤트만 처리 (초기 스냅샷 등은 무시)
+                                let bids_count = update.bids.as_ref().map(|b| b.len()).unwrap_or(0);
+                                let asks_count = update.asks.as_ref().map(|a| a.len()).unwrap_or(0);
+                                
                                 if let Some(event_type) = &update.event_type {
                                     if event_type == "depthUpdate" {
                                         // bids나 asks가 있어야 처리
-                                        if update.bids.is_some() || update.asks.is_some() {
+                                        if bids_count > 0 || asks_count > 0 {
                                             // 채널로 전송
                                             if update_tx.send(update).is_err() {
                                                 // 수신자가 없으면 종료
+                                                eprintln!("[Binance Client] Receiver dropped, stopping");
                                                 return Ok(());
                                             }
+                                        } else {
+                                            // bids/asks가 비어있음
+                                            eprintln!("[Binance Client] depthUpdate with empty bids/asks (bids={}, asks={})", bids_count, asks_count);
                                         }
                                     }
                                 } else {
                                     // event_type이 없으면 초기 스냅샷이거나 다른 형식
                                     // bids/asks가 있으면 처리 (초기 스냅샷)
-                                    if update.bids.is_some() || update.asks.is_some() {
+                                    if bids_count > 0 || asks_count > 0 {
                                         // 초기 스냅샷도 처리 (depthUpdate로 변환)
                                         let mut snapshot_update = update.clone();
                                         snapshot_update.event_type = Some("depthUpdate".to_string());
@@ -207,13 +214,17 @@ impl BinanceClient {
                                         snapshot_update.symbol = Some("SOLUSDT".to_string());
                                         
                                         if update_tx.send(snapshot_update).is_err() {
+                                            eprintln!("[Binance Client] Receiver dropped, stopping");
                                             return Ok(());
                                         }
+                                    } else {
+                                        eprintln!("[Binance Client] Snapshot with empty bids/asks (bids={}, asks={})", bids_count, asks_count);
                                     }
                                 }
                             }
-                            Err(_) => {
-                                // 파싱 실패는 무시 (다른 형식의 메시지일 수 있음)
+                            Err(e) => {
+                                // 파싱 실패 로그 출력 (첫 몇 개만)
+                                eprintln!("[Binance Client] Failed to parse message: {}", e);
                             }
                         }
                     }

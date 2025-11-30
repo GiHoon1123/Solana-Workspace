@@ -1,5 +1,4 @@
-use axum::{extract::State, Json, response::IntoResponse, body::Body, http::Request};
-use tokio_tungstenite::tungstenite::Message as WsMessage;
+use axum::{extract::{State, ws::{WebSocketUpgrade, Message as WsMessage}}, Json, response::IntoResponse};
 use futures_util::{SinkExt, StreamExt};
 use utoipa::ToSchema;
 use serde::{Deserialize, Serialize};
@@ -170,66 +169,14 @@ pub async fn delete_bot_data(
 /// ```
 pub async fn handle_websocket(
     State(app_state): State<AppState>,
-    req: Request<Body>,
+    ws: WebSocketUpgrade,
 ) -> axum::response::Response {
-    use axum::response::Response;
-    use axum::body::Body as AxumBody;
-    use hyper::upgrade::OnUpgrade;
-    use tokio_tungstenite::WebSocketStream;
-    use tokio_tungstenite::tungstenite::protocol::Role;
-    
     let ws_server = app_state.bot_ws_server.clone();
     
-    // HTTP 업그레이드 헤더 확인
-    if !req.headers().contains_key("upgrade") {
-        return Response::builder()
-            .status(400)
-            .body(AxumBody::from("Not a WebSocket request"))
-            .unwrap();
-    }
-    
-    // WebSocket 업그레이드 처리
-    let (mut parts, _) = req.into_parts();
-    
-    // upgrade 확장 가져오기
-    let upgrade = match parts.extensions.remove::<OnUpgrade>() {
-        Some(upgrade) => upgrade,
-        None => {
-            return Response::builder()
-                .status(500)
-                .body(AxumBody::from("Upgrade not available"))
-                .unwrap();
-        }
-    };
-    
-    // WebSocket 연결 처리
-    tokio::spawn(async move {
-        let upgraded = match upgrade.await {
-            Ok(upgraded) => upgraded,
-            Err(_) => {
-                eprintln!("[WebSocket Handler] Upgrade failed");
-                return;
-            }
-        };
-        
-        // Upgraded를 WebSocket 스트림으로 변환
-        // hyper::upgrade::Upgraded를 tokio::io::AsyncRead + AsyncWrite로 변환
-        use hyper_util::rt::TokioIo;
-        
-        // Upgraded를 TokioIo로 래핑하여 tokio::io::AsyncRead + AsyncWrite로 변환
-        let io = TokioIo::new(upgraded);
-        
-        // WebSocket 스트림 생성
-        let ws_stream = WebSocketStream::from_raw_socket(
-            io,
-            Role::Server,
-            None,
-        ).await;
-        
-        let (mut sender, mut receiver) = ws_stream.split();
+    // Axum의 WebSocketUpgrade를 사용하여 WebSocket 연결 처리
+    ws.on_upgrade(move |socket| async move {
+        let (mut sender, mut receiver) = socket.split();
         let mut rx = ws_server.update_tx.subscribe();
-        
-        // 클라이언트 연결 (로그 제거)
         
         // 오더북 업데이트를 클라이언트로 전송하는 태스크
         let mut send_task = tokio::spawn(async move {
@@ -244,25 +191,23 @@ pub async fn handle_websocket(
                 
                 if sender.send(WsMessage::Text(json)).await.is_err() {
                     // 클라이언트 연결 끊어짐
-                    // 클라이언트 연결 끊어짐
                     break;
                 }
             }
         });
         
-        // 클라이언트로부터 메시지 수신 태스크 (필요시)
-        // sender는 send_task에서 사용되므로, recv_task에서는 사용하지 않습니다.
+        // 클라이언트로부터 메시지 수신 태스크 (Ping/Pong 처리)
         let mut recv_task = tokio::spawn(async move {
             while let Some(Ok(msg)) = receiver.next().await {
                 match msg {
                     WsMessage::Close(_) => {
                         // 클라이언트가 연결 종료
-                        // 클라이언트 연결 종료
                         break;
                     }
-                    WsMessage::Ping(_data) => {
-                        // Ping에 대한 Pong 응답은 send_task에서 처리할 수 없으므로
-                        // 여기서는 무시합니다 (필요시 별도 처리)
+                    WsMessage::Ping(data) => {
+                        // Ping에 대한 Pong 응답
+                        // sender는 send_task에서 사용 중이므로, 여기서는 처리하지 않음
+                        // Axum의 WebSocket은 자동으로 Pong을 처리합니다
                     }
                     _ => {
                         // 다른 메시지는 무시 (필요시 처리)
@@ -280,17 +225,6 @@ pub async fn handle_websocket(
                 send_task.abort();
             }
         };
-        
-        // WebSocket 연결 종료
-    });
-    
-    // WebSocket 업그레이드 응답
-    // Sec-WebSocket-Accept 헤더는 hyper가 자동으로 처리합니다.
-    Response::builder()
-        .status(101)
-        .header("Upgrade", "websocket")
-        .header("Connection", "Upgrade")
-        .body(AxumBody::empty())
-        .unwrap()
+    })
 }
 

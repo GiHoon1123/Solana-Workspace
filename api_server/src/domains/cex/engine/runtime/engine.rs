@@ -419,17 +419,23 @@ impl HighPerformanceEngine {
         use crate::domains::cex::engine::order_to_entry;
         use anyhow::Context;
         
+        eprintln!("[Engine Start] Starting engine initialization...");
+        
         if self.mode.load_from_db() {
+            eprintln!("[Engine Start] Loading data from database...");
             let db = self
                 .db
                 .as_ref()
                 .context("Database unavailable in this mode")?;
 
+            eprintln!("[Engine Start] Loading balances from database...");
             let balance_repo = UserBalanceRepository::new(db.pool().clone());
             let all_balances = balance_repo
                 .get_all_balances()
                 .await
                 .context("Failed to load balances from database")?;
+            
+            eprintln!("[Engine Start] Loaded {} balances from database", all_balances.len());
 
             {
                 // 잔고 로드: locked는 0으로 초기화 (활성 주문 기반으로 재계산)
@@ -445,18 +451,28 @@ impl HighPerformanceEngine {
                 }
             }
 
+            eprintln!("[Engine Start] Loading active orders from database...");
             let order_repo = OrderRepository::new(db.pool().clone());
             let active_orders = order_repo
                 .get_all_active_orders()
                 .await
                 .context("Failed to load active orders from database")?;
+            
+            let active_orders_count = active_orders.len();
+            eprintln!("[Engine Start] Loaded {} active orders from database", active_orders_count);
 
             // 활성 주문을 오더북에 추가하고 잔고 잠금 재계산
+            eprintln!("[Engine Start] Processing {} active orders (adding to orderbook and recalculating locked balances)...", active_orders_count);
             {
                 let mut executor = self.executor.lock();
                 let mut orderbooks = self.orderbooks.write();
                 
+                let mut processed = 0u64;
                 for order in active_orders {
+                    processed += 1;
+                    if processed % 1000 == 0 {
+                        eprintln!("[Engine Start] Processed {}/{} orders...", processed, active_orders_count);
+                    }
                     let entry = order_to_entry(&order);
                     
                     // 지정가 주문만 오더북에 추가 (시장가 주문은 오더북에 포함되지 않음)
@@ -494,6 +510,7 @@ impl HighPerformanceEngine {
                         // 잔고 잠금 실패 - 데이터 불일치 가능성 있음
                     }
                 }
+                eprintln!("[Engine Start] Completed processing all {} active orders", active_orders_count);
             }
         } else {
             let mut executor = self.executor.lock();
@@ -524,6 +541,7 @@ impl HighPerformanceEngine {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 4. WAL 스레드 시작 (필요한 경우)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        eprintln!("[Engine Start] Starting WAL thread...");
         if self.mode.use_wal() {
             let wal_rx = self.wal_rx.clone();
             let wal_dir = self.wal_dir.clone();
@@ -531,8 +549,10 @@ impl HighPerformanceEngine {
                 super::threads::wal_thread_loop(wal_rx, wal_dir);
             });
             self.wal_thread = Some(wal_thread);
+            eprintln!("[Engine Start] WAL thread started");
         } else {
             self.wal_thread = None;
+            eprintln!("[Engine Start] WAL thread disabled");
         }
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -545,6 +565,7 @@ impl HighPerformanceEngine {
         // 6. 엔진 스레드 시작
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         
+        eprintln!("[Engine Start] Starting engine thread...");
         let order_rx = self.order_rx.clone();
         let balance_rx = self.balance_rx.clone();
         let wal_tx = self.wal_tx.clone();
@@ -567,6 +588,8 @@ impl HighPerformanceEngine {
             );
         });
         self.engine_thread = Some(engine_thread);
+        eprintln!("[Engine Start] Engine thread started");
+        eprintln!("[Engine Start] Engine initialization completed successfully");
         
         Ok(())
     }
