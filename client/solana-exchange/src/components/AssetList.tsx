@@ -8,12 +8,62 @@ export default function AssetList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [solPrice, setSolPrice] = useState<number | null>(null); // SOL 현재 가격 (USDT)
 
   // Hydration 에러 방지: 클라이언트에서만 렌더링
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
+  // SOL 현재 가격 가져오기 (바이낸스 WebSocket - 실시간)
+  useEffect(() => {
+    // 초기 가격 가져오기 (REST API)
+    const fetchInitialPrice = async () => {
+      try {
+        const response = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT');
+        const data = await response.json();
+        const price = parseFloat(data.price) || null;
+        if (price) setSolPrice(price);
+      } catch (error) {
+        console.error('SOL 초기 가격 가져오기 실패:', error);
+      }
+    };
+
+    fetchInitialPrice();
+
+    // WebSocket으로 실시간 가격 받기
+    const ws = new WebSocket('wss://stream.binance.com:9443/ws/solusdt@ticker');
+
+    ws.onopen = () => {
+      console.log('AssetList: SOL 가격 WebSocket 연결됨');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        const price = parseFloat(data.c) || null; // 현재가 (last price)
+        if (price && price > 0) {
+          setSolPrice(price);
+        }
+      } catch (error) {
+        console.error('SOL 가격 WebSocket 데이터 파싱 실패:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.warn('AssetList: SOL 가격 WebSocket 연결 오류');
+    };
+
+    ws.onclose = () => {
+      console.warn('AssetList: SOL 가격 WebSocket 연결 종료');
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, []);
+
+  // 자산 내역 가져오기 (초기 로드 및 주기적 갱신)
   useEffect(() => {
     if (!isMounted) return;
 
@@ -24,7 +74,10 @@ export default function AssetList() {
       }
 
       try {
-        setLoading(true);
+        // solPrice 변경 시에는 로딩 상태를 표시하지 않음 (깜빡임 방지)
+        if (positions.length === 0) {
+          setLoading(true);
+        }
         setError(null);
         
         // 먼저 positions API 시도, 실패하면 balances API 사용
@@ -47,28 +100,40 @@ export default function AssetList() {
             
             // balances를 positions 형식으로 변환 (USDT 포함)
             const convertedPositions: AssetPosition[] = balancesResponse.balances
-              .map(b => ({
-                mint: b.mint_address,
-                current_balance: (parseFloat(b.available) + parseFloat(b.locked)).toString(),
-                available: b.available,
-                locked: b.locked,
-                average_entry_price: null,
-                total_bought_amount: '0',
-                total_bought_cost: '0',
-                // USDT는 가격이 항상 1 USDT = 1 USDT
-                current_market_price: b.mint_address === 'USDT' ? '1' : null,
-                // USDT는 평가액 = 잔액 (1:1)
-                current_value: b.mint_address === 'USDT' 
-                  ? (parseFloat(b.available) + parseFloat(b.locked)).toString()
-                  : null,
-                unrealized_pnl: null,
-                unrealized_pnl_percent: null,
-                trade_summary: {
-                  total_buy_trades: 0,
-                  total_sell_trades: 0,
-                  realized_pnl: '0',
-                },
-              }));
+              .map(b => {
+                const balance = parseFloat(b.available) + parseFloat(b.locked);
+                
+                // SOL의 경우 바이낸스 가격 사용, USDT는 1, 그 외는 null
+                let marketPrice: string | null = null;
+                let value: string | null = null;
+                
+                if (b.mint_address === 'USDT') {
+                  marketPrice = '1';
+                  value = balance.toString();
+                } else if (b.mint_address === 'SOL' && solPrice) {
+                  marketPrice = solPrice.toString();
+                  value = (solPrice * balance).toString();
+                }
+                
+                return {
+                  mint: b.mint_address,
+                  current_balance: balance.toString(),
+                  available: b.available,
+                  locked: b.locked,
+                  average_entry_price: null,
+                  total_bought_amount: '0',
+                  total_bought_cost: '0',
+                  current_market_price: marketPrice,
+                  current_value: value,
+                  unrealized_pnl: null,
+                  unrealized_pnl_percent: null,
+                  trade_summary: {
+                    total_buy_trades: 0,
+                    total_sell_trades: 0,
+                    realized_pnl: '0',
+                  },
+                };
+              });
             
             // USDT를 최상단에 고정
             const sortedPositions = convertedPositions.sort((a, b) => {
@@ -111,7 +176,27 @@ export default function AssetList() {
     const interval = setInterval(fetchPositions, 5000);
 
     return () => clearInterval(interval);
-  }, [isMounted]);
+  }, [isMounted]); // solPrice 제거 - 가격 변경 시에는 positions를 다시 가져오지 않음
+
+  // solPrice 변경 시 기존 positions의 평가액만 업데이트 (깜빡임 방지)
+  useEffect(() => {
+    if (!solPrice || positions.length === 0) return;
+
+    setPositions(prevPositions => 
+      prevPositions.map(position => {
+        // SOL의 경우만 가격과 평가액 업데이트
+        if (position.mint === 'SOL') {
+          const balance = parseFloat(position.current_balance);
+          return {
+            ...position,
+            current_market_price: solPrice.toString(),
+            current_value: (solPrice * balance).toString(),
+          };
+        }
+        return position;
+      })
+    );
+  }, [solPrice]); // solPrice만 의존 - positions는 의존성에서 제외
 
   const formatNumber = (value: string | null | undefined, decimals: number = 2): string => {
     if (!value) return '--';
@@ -194,11 +279,20 @@ export default function AssetList() {
                   {/* 자산명 */}
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-white font-semibold text-sm">{position.mint}</span>
-                    {position.current_market_price && (
-                      <span className="text-gray-400 text-xs">
-                        ${formatNumber(position.current_market_price)}
-                      </span>
-                    )}
+                    {(() => {
+                      // SOL의 경우 바이낸스 가격 사용, 그 외는 백엔드 가격 사용
+                      const price = position.mint === 'SOL' && solPrice 
+                        ? solPrice 
+                        : position.current_market_price 
+                          ? parseFloat(position.current_market_price) 
+                          : null;
+                      
+                      return price ? (
+                        <span className="text-gray-400 text-xs">
+                          ${formatNumber(price.toString())}
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
 
                   {/* 보유 수량 */}
@@ -220,16 +314,35 @@ export default function AssetList() {
                   </div>
 
                   {/* 평가액 */}
-                  {position.current_value && (
-                    <div className="mb-2">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="text-gray-400">평가액</span>
-                        <span className="text-white font-medium">
-                          {formatCurrency(position.current_value)}
-                        </span>
+                  {(() => {
+                    // 평가액 계산: 현재 가격 × 보유 수량
+                    let calculatedValue: number | null = null;
+                    
+                    if (position.mint === 'SOL' && solPrice) {
+                      // SOL의 경우 바이낸스 가격 사용
+                      calculatedValue = solPrice * parseFloat(position.current_balance);
+                    } else if (position.current_value) {
+                      // 백엔드에서 제공하는 평가액 사용
+                      calculatedValue = parseFloat(position.current_value);
+                    } else if (position.current_market_price) {
+                      // 백엔드 가격으로 계산
+                      calculatedValue = parseFloat(position.current_market_price) * parseFloat(position.current_balance);
+                    } else if (position.mint === 'USDT') {
+                      // USDT는 1:1
+                      calculatedValue = parseFloat(position.current_balance);
+                    }
+                    
+                    return calculatedValue !== null ? (
+                      <div className="mb-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-gray-400">평가액</span>
+                          <span className="text-white font-medium">
+                            {formatCurrency(calculatedValue.toString())}
+                          </span>
+                        </div>
                       </div>
-                    </div>
-                  )}
+                    ) : null;
+                  })()}
 
                   {/* 평균 매수가 */}
                   {position.average_entry_price && (
