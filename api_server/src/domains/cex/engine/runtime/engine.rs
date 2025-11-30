@@ -434,17 +434,19 @@ impl HighPerformanceEngine {
             eprintln!("[Engine Start] Found {} balances in database", all_balances.len());
 
             {
+                // 잔고 로드: locked는 0으로 초기화 (활성 주문 기반으로 재계산)
                 let mut executor = self.executor.lock();
                 for balance in all_balances {
+                    // locked는 0으로 초기화 (활성 주문 기반으로 재계산할 예정)
                     executor.balance_cache_mut().set_balance(
                         balance.user_id,
                         &balance.mint_address,
-                        balance.available,
-                        balance.locked,
+                        balance.available + balance.locked, // available + locked를 available로 합침
+                        rust_decimal::Decimal::ZERO, // locked는 0으로 초기화
                     );
                     eprintln!(
-                        "[Engine Start] Loaded balance: user_id={}, mint={}, available={}, locked={}",
-                        balance.user_id, balance.mint_address, balance.available, balance.locked
+                        "[Engine Start] Loaded balance: user_id={}, mint={}, available={}, locked=0 (will recalculate from active orders)",
+                        balance.user_id, balance.mint_address, balance.available + balance.locked
                     );
                 }
             }
@@ -455,15 +457,66 @@ impl HighPerformanceEngine {
                 .await
                 .context("Failed to load active orders from database")?;
 
+            eprintln!("[Engine Start] Found {} active orders in database", active_orders.len());
+
+            // 활성 주문을 오더북에 추가하고 잔고 잠금 재계산
             {
+                let mut executor = self.executor.lock();
                 let mut orderbooks = self.orderbooks.write();
+                
                 for order in active_orders {
                     let entry = order_to_entry(&order);
-                    let pair = TradingPair::new(entry.base_mint.clone(), entry.quote_mint.clone());
-                    let pair_clone = pair.clone();
-                    let orderbook =
-                        orderbooks.entry(pair).or_insert_with(move || OrderBook::new(pair_clone));
-                    orderbook.add_order(entry);
+                    
+                    // 지정가 주문만 오더북에 추가 (시장가 주문은 오더북에 포함되지 않음)
+                    if order.order_side == "limit" && entry.price.is_some() {
+                        let pair = TradingPair::new(entry.base_mint.clone(), entry.quote_mint.clone());
+                        let pair_clone = pair.clone();
+                        let orderbook =
+                            orderbooks.entry(pair).or_insert_with(move || OrderBook::new(pair_clone));
+                        orderbook.add_order(entry.clone());
+                        eprintln!(
+                            "[Engine Start] Added limit order to orderbook: order_id={}, user_id={}, type={}, price={:?}",
+                            order.id, order.user_id, order.order_type, entry.price
+                        );
+                    } else if order.order_side == "market" {
+                        // 시장가 주문이 활성 상태로 남아있다는 것은 데이터 불일치
+                        // 시장가 주문은 즉시 체결되거나 취소되어야 하므로 오더북에 추가하지 않음
+                        eprintln!(
+                            "[Engine Start] Warning: Market order found in active orders (data inconsistency): order_id={}, user_id={}, status={}, filled={}/{}",
+                            order.id, order.user_id, order.status, order.filled_amount, order.amount
+                        );
+                        // 시장가 주문은 잔고 잠금만 재계산 (오더북에는 추가하지 않음)
+                    }
+                    
+                    // 모든 활성 주문에 대해 잔고 잠금 재계산 (지정가/시장가 모두)
+                    let (lock_mint, lock_amount) = if order.order_type == "buy" {
+                        // 매수: quote_mint 잠금
+                        let amount = if order.order_side == "market" {
+                            // 시장가 매수: quote_amount 사용 (없으면 0)
+                            entry.quote_amount.unwrap_or(rust_decimal::Decimal::ZERO)
+                        } else {
+                            // 지정가 매수: price * remaining_amount
+                            entry.price.unwrap_or(rust_decimal::Decimal::ZERO) * entry.remaining_amount
+                        };
+                        (&order.quote_mint, amount)
+                    } else {
+                        // 매도: base_mint 잠금 (remaining_amount만큼)
+                        (&order.base_mint, entry.remaining_amount)
+                    };
+                    
+                    // 잔고 잠금 (에러 발생 시 로그만 출력하고 계속 진행)
+                    if let Err(e) = executor.lock_balance_for_order(order.id, order.user_id, lock_mint, lock_amount) {
+                        eprintln!(
+                            "[Engine Start] Warning: Failed to lock balance for order {}: user_id={}, mint={}, amount={}, error={}",
+                            order.id, order.user_id, lock_mint, lock_amount, e
+                        );
+                        // 잔고 잠금 실패 - 데이터 불일치 가능성 있음
+                    } else {
+                        eprintln!(
+                            "[Engine Start] Locked balance for order {}: user_id={}, mint={}, amount={}",
+                            order.id, order.user_id, lock_mint, lock_amount
+                        );
+                    }
                 }
             }
         } else {

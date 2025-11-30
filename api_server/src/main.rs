@@ -48,7 +48,9 @@ use crate::domains::cex::models::*;
         crate::domains::cex::handlers::trade_handler::get_trades,
         crate::domains::cex::handlers::trade_handler::get_my_trades,
         crate::domains::cex::handlers::trade_handler::get_latest_price,
-        crate::domains::cex::handlers::trade_handler::get_24h_volume
+        crate::domains::cex::handlers::trade_handler::get_24h_volume,
+        crate::domains::cex::handlers::position_handler::get_position,
+        crate::domains::cex::handlers::position_handler::get_all_positions
     ),
     components(schemas(
         QuoteRequest,
@@ -87,7 +89,11 @@ use crate::domains::cex::models::*;
         OrderBookEntry,
         OrderBookResponse,
         Trade,
-        TradesResponse
+        TradesResponse,
+        AssetPosition,
+        AssetPositionResponse,
+        AllPositionsResponse,
+        TradeSummary
     )),
     modifiers(
         &SecurityAddon
@@ -99,7 +105,8 @@ use crate::domains::cex::models::*;
         (name = "Wallets", description = "Wallet API endpoints (Solana wallet management)"),
         (name = "CEX Balances", description = "CEX Exchange balance API endpoints"),
         (name = "CEX Orders", description = "CEX Exchange order API endpoints"),
-        (name = "CEX Trades", description = "CEX Exchange trade API endpoints")
+        (name = "CEX Trades", description = "CEX Exchange trade API endpoints"),
+        (name = "CEX Positions", description = "CEX Exchange position API endpoints (P&L, average entry price)")
     ),
     info(
         title = "Solana API Server",
