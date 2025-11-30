@@ -99,6 +99,11 @@ pub async fn get_trades(
 /// Query parameters for my trades
 #[derive(Debug, Deserialize, ToSchema, IntoParams)]
 pub struct MyTradesQuery {
+    /// 자산 식별자 (선택, 특정 자산만 필터링)
+    /// Asset identifier (optional, filter by specific asset)
+    #[serde(default)]
+    pub mint: Option<String>,
+    
     /// 최대 조회 개수 (기본: 100)
     /// Limit (default: 100)
     #[serde(default)]
@@ -114,11 +119,13 @@ pub struct MyTradesQuery {
 /// Get my trades handler
 /// 
 /// 현재 로그인한 사용자가 참여한 모든 체결 내역을 조회합니다.
+/// 특정 자산(mint)을 지정하면 해당 자산의 거래 내역만 필터링합니다.
 /// 
 /// # Authentication
 /// JWT 토큰 필요
 /// 
 /// # Query Parameters
+/// - mint: 자산 식별자 (optional, 예: "SOL", 특정 자산만 필터링)
 /// - limit: 최대 조회 개수 (optional, default: 100)
 /// - offset: 페이지네이션 오프셋 (optional, default: 0)
 /// 
@@ -129,6 +136,7 @@ pub struct MyTradesQuery {
 /// 
 /// # 용도
 /// - 사용자 마이페이지의 "내 거래 내역" 표시
+/// - 특정 자산의 거래 내역 조회 (포지션 페이지에서 사용)
 #[utoipa::path(
     get,
     path = "/api/cex/trades/my",
@@ -150,11 +158,11 @@ pub async fn get_my_trades(
     AuthenticatedUser { user_id, .. }: AuthenticatedUser,
     Query(query): Query<MyTradesQuery>,
 ) -> Result<Json<Vec<Trade>>, (StatusCode, Json<serde_json::Value>)> {
-    // Service 호출
+    // Service 호출 (mint 파라미터 전달)
     let trades = app_state
         .cex_state
         .trade_service
-        .get_my_trades(user_id, query.limit, query.offset)
+        .get_my_trades(user_id, query.mint.as_deref(), query.limit, query.offset)
         .await
         .map_err(|e| {
             (

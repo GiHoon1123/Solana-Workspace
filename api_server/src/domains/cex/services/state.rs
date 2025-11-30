@@ -2,7 +2,7 @@
 // CEX 도메인 상태
 use std::sync::Arc;
 use crate::shared::database::Database;
-use crate::domains::cex::services::{BalanceService, FeeService, OrderService, TradeService};
+use crate::domains::cex::services::{BalanceService, FeeService, OrderService, TradeService, PositionService};
 use crate::domains::cex::engine::runtime::HighPerformanceEngine;
 
 /// CEX domain state
@@ -14,6 +14,7 @@ pub struct CexState {
     pub fee_service: FeeService,
     pub order_service: OrderService,
     pub trade_service: TradeService,
+    pub position_service: PositionService,
 }
 
 impl CexState {
@@ -29,7 +30,8 @@ impl CexState {
             balance_service: BalanceService::new(db.clone()),
             fee_service: FeeService::new(db.clone()),
             order_service: OrderService::new(db.clone(), engine),
-            trade_service: TradeService::new(db),
+            trade_service: TradeService::new(db.clone()),
+            position_service: PositionService::new(db),
         }
     }
 }

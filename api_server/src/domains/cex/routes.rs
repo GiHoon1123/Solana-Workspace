@@ -29,6 +29,10 @@ use super::handlers;
 /// ## Balances (잔고)
 /// - `GET    /api/cex/balances` - 내 잔고 조회
 /// - `POST   /api/cex/balances` - 잔고 초기화
+/// 
+/// ## Positions (포지션)
+/// - `GET    /api/cex/positions` - 모든 자산 포지션 조회
+/// - `GET    /api/cex/positions/:mint` - 특정 자산 포지션 조회
 pub fn create_cex_router() -> Router<AppState> {
     Router::new()
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -75,4 +79,14 @@ pub fn create_cex_router() -> Router<AppState> {
         
         // 특정 자산 잔고 조회
         .route("/balances/:mint", get(handlers::get_balance))
+        
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // Positions (포지션)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        
+        // 모든 자산 포지션 조회
+        .route("/positions", get(handlers::get_all_positions))
+        
+        // 특정 자산 포지션 조회
+        .route("/positions/:mint", get(handlers::get_position))
 }

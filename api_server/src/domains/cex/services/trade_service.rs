@@ -136,70 +136,19 @@ impl TradeService {
     pub async fn get_my_trades(
         &self,
         user_id: u64,
+        mint: Option<&str>,
         limit: Option<i64>,
         offset: Option<i64>,
     ) -> Result<Vec<Trade>> {
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 1. 사용자의 모든 주문 ID 조회
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        let order_repo = OrderRepository::new(self.db.pool().clone());
-        
-        // 사용자의 모든 주문 조회 (상태 무관)
-        let orders = order_repo
-            .get_all_by_user(user_id, None, None)
-            .await
-            .context("Failed to fetch user orders")?;
-
-        // 주문 ID 목록 추출
-        let order_ids: Vec<u64> = orders.iter().map(|o| o.id).collect();
-
-        if order_ids.is_empty() {
-            // 주문이 없으면 체결도 없음
-            return Ok(Vec::new());
-        }
-
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 2. 해당 주문들의 체결 내역을 하나씩 조회하여 합침
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // TODO: 나중에 Repository에 get_by_orders 메서드 추가하면 최적화 가능
+        // TradeRepository의 get_by_user 메서드 사용 (효율적)
+        // Uses TradeRepository's get_by_user method (efficient)
         let trade_repo = TradeRepository::new(self.db.pool().clone());
         
-        let mut all_trades = Vec::new();
+        let trades = trade_repo
+            .get_by_user(user_id, mint, limit, offset)
+            .await
+            .context("Failed to fetch user trades")?;
         
-        for order_id in order_ids {
-            // 매수 체결
-            let mut buy_trades = trade_repo
-                .get_by_buy_order(order_id, None, None)
-                .await
-                .context("Failed to fetch buy trades")?;
-            
-            // 매도 체결
-            let mut sell_trades = trade_repo
-                .get_by_sell_order(order_id, None, None)
-                .await
-                .context("Failed to fetch sell trades")?;
-            
-            all_trades.append(&mut buy_trades);
-            all_trades.append(&mut sell_trades);
-        }
-        
-        // 중복 제거 (같은 trade_id)
-        all_trades.sort_by_key(|t| t.id);
-        all_trades.dedup_by_key(|t| t.id);
-        
-        // 시간순 정렬 (최신순)
-        all_trades.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        
-        // limit/offset 적용
-        let offset = offset.unwrap_or(0) as usize;
-        let limit = limit.map(|l| l as usize);
-        
-        let trades: Vec<Trade> = all_trades
-            .into_iter()
-            .skip(offset)
-            .take(limit.unwrap_or(usize::MAX))
-            .collect();
-
         Ok(trades)
     }
 
