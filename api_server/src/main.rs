@@ -51,7 +51,10 @@ use crate::domains::cex::models::*;
         crate::domains::cex::handlers::trade_handler::get_24h_volume,
         crate::domains::cex::handlers::position_handler::get_position,
         crate::domains::cex::handlers::position_handler::get_all_positions,
-        crate::domains::bot::handlers::bot_handler::delete_bot_data
+        crate::domains::bot::handlers::bot_handler::delete_bot_data,
+        crate::domains::bot::handlers::bot_handler::get_cleanup_scheduler_status,
+        crate::domains::bot::handlers::bot_handler::enable_cleanup_scheduler,
+        crate::domains::bot::handlers::bot_handler::disable_cleanup_scheduler
     ),
     components(schemas(
         QuoteRequest,
@@ -163,7 +166,7 @@ async fn main() {
     eprintln!("[Main] ID generators initialized (timestamp-based, no DB access)");
 
     // AppState 생성 (모든 Service 초기화)
-    let app_state = AppState::new(db.clone())
+    let mut app_state = AppState::new(db.clone())
         .expect("Failed to initialize AppState");
     
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -250,6 +253,20 @@ async fn main() {
     });
     
     eprintln!("[Main] Bot orderbook synchronization started");
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 봇 데이터 정리 스케줄러 설정 및 시작
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("[Main] Setting up bot cleanup scheduler...");
+    {
+        let bot1_user_id = bot_manager.bot1_user_id();
+        let bot2_user_id = bot_manager.bot2_user_id();
+        
+        // AppState에 스케줄러 설정 및 시작
+        app_state.setup_bot_cleanup_scheduler(bot1_user_id, bot2_user_id);
+        
+        eprintln!("[Main] Bot cleanup scheduler started (disabled by default, use API to enable)");
+    }
 
     // CORS 설정
     let cors = CorsLayer::new()

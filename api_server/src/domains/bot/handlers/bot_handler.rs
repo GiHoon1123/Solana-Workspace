@@ -145,3 +145,80 @@ pub async fn delete_bot_data(
     })).into_response()
 }
 
+/// 스케줄러 상태 조회
+/// Get scheduler status
+/// 
+/// 봇 데이터 정리 스케줄러의 활성화 상태를 조회합니다.
+#[utoipa::path(
+    get,
+    path = "/api/bot/cleanup-scheduler/status",
+    responses(
+        (status = 200, description = "스케줄러 상태 조회 성공", body = serde_json::Value),
+        (status = 500, description = "서버 오류")
+    ),
+    tag = "Bot"
+)]
+pub async fn get_cleanup_scheduler_status(
+    State(app_state): State<AppState>,
+) -> axum::response::Response {
+    let is_enabled = app_state.bot_cleanup_scheduler.is_enabled();
+    
+    (axum::http::StatusCode::OK, axum::Json(serde_json::json!({
+        "enabled": is_enabled,
+        "interval_seconds": 180,
+        "message": if is_enabled {
+            "스케줄러가 활성화되어 있습니다. 3분마다 봇 데이터를 정리합니다."
+        } else {
+            "스케줄러가 비활성화되어 있습니다."
+        }
+    }))).into_response()
+}
+
+/// 스케줄러 활성화
+/// Enable scheduler
+/// 
+/// 봇 데이터 정리 스케줄러를 활성화합니다.
+#[utoipa::path(
+    post,
+    path = "/api/bot/cleanup-scheduler/enable",
+    responses(
+        (status = 200, description = "스케줄러 활성화 성공", body = serde_json::Value),
+        (status = 500, description = "서버 오류")
+    ),
+    tag = "Bot"
+)]
+pub async fn enable_cleanup_scheduler(
+    State(app_state): State<AppState>,
+) -> axum::response::Response {
+    app_state.bot_cleanup_scheduler.enable();
+    
+    (axum::http::StatusCode::OK, axum::Json(serde_json::json!({
+        "enabled": true,
+        "message": "스케줄러가 활성화되었습니다. 3분마다 봇 데이터를 정리합니다."
+    }))).into_response()
+}
+
+/// 스케줄러 비활성화
+/// Disable scheduler
+/// 
+/// 봇 데이터 정리 스케줄러를 비활성화합니다.
+#[utoipa::path(
+    post,
+    path = "/api/bot/cleanup-scheduler/disable",
+    responses(
+        (status = 200, description = "스케줄러 비활성화 성공", body = serde_json::Value),
+        (status = 500, description = "서버 오류")
+    ),
+    tag = "Bot"
+)]
+pub async fn disable_cleanup_scheduler(
+    State(app_state): State<AppState>,
+) -> axum::response::Response {
+    app_state.bot_cleanup_scheduler.disable();
+    
+    (axum::http::StatusCode::OK, axum::Json(serde_json::json!({
+        "enabled": false,
+        "message": "스케줄러가 비활성화되었습니다."
+    }))).into_response()
+}
+
