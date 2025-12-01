@@ -51,10 +51,12 @@ pub enum DbCommand {
     /// * `order_id` - 주문 ID
     /// * `status` - 새 상태 ("pending", "partial", "filled", "cancelled")
     /// * `filled_amount` - 체결된 수량
+    /// * `filled_quote_amount` - 체결된 금액 (USDT 기준)
     UpdateOrderStatus {
         order_id: u64,
         status: String,
         filled_amount: Decimal,
+        filled_quote_amount: Decimal,
     },
     
     /// 체결 내역 저장

@@ -20,11 +20,11 @@ impl OrderRepository {
             r#"
             INSERT INTO orders (
                 user_id, order_type, order_side, base_mint, quote_mint,
-                price, amount, filled_amount, status, created_at, updated_at
+                price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
             RETURNING id, user_id, order_type, order_side, base_mint, quote_mint,
-                      price, amount, filled_amount, status, created_at, updated_at
+                      price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             "#,
         )
         .bind(order_create.user_id as i64)
@@ -35,6 +35,7 @@ impl OrderRepository {
         .bind(&order_create.price)
         .bind(&order_create.amount)
         .bind(Decimal::ZERO) // filled_amount 초기값은 0
+        .bind(Decimal::ZERO) // filled_quote_amount 초기값은 0
         .bind("pending") // status 초기값은 pending
         .bind(Utc::now())
         .bind(Utc::now())
@@ -51,7 +52,7 @@ impl OrderRepository {
         let row = sqlx::query(
             r#"
             SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
-                   price, amount, filled_amount, status, created_at, updated_at
+                   price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             FROM orders
             WHERE id = $1
             "#,
@@ -78,7 +79,7 @@ impl OrderRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
-                   price, amount, filled_amount, status, created_at, updated_at
+                   price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             FROM orders
             WHERE user_id = $1
             ORDER BY created_at DESC
@@ -110,7 +111,7 @@ impl OrderRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
-                   price, amount, filled_amount, status, created_at, updated_at
+                   price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             FROM orders
             WHERE user_id = $1 AND status = $2
             ORDER BY created_at DESC
@@ -142,7 +143,7 @@ impl OrderRepository {
         let buy_orders = sqlx::query(
             r#"
             SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
-                   price, amount, filled_amount, status, created_at, updated_at
+                   price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             FROM orders
             WHERE base_mint = $1 
               AND quote_mint = $2 
@@ -164,7 +165,7 @@ impl OrderRepository {
         let sell_orders = sqlx::query(
             r#"
             SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
-                   price, amount, filled_amount, status, created_at, updated_at
+                   price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             FROM orders
             WHERE base_mint = $1 
               AND quote_mint = $2 
@@ -255,7 +256,7 @@ impl OrderRepository {
             SET status = $1, updated_at = $2
             WHERE id = $3
             RETURNING id, user_id, order_type, order_side, base_mint, quote_mint,
-                      price, amount, filled_amount, status, created_at, updated_at
+                      price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             "#,
         )
         .bind(status)
@@ -289,7 +290,7 @@ impl OrderRepository {
                 updated_at = $2
             WHERE id = $3
             RETURNING id, user_id, order_type, order_side, base_mint, quote_mint,
-                      price, amount, filled_amount, status, created_at, updated_at
+                      price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             "#,
         )
         .bind(filled_amount)
@@ -311,7 +312,7 @@ impl OrderRepository {
             SET status = 'cancelled', updated_at = $1
             WHERE id = $2 AND status IN ('pending', 'partial')
             RETURNING id, user_id, order_type, order_side, base_mint, quote_mint,
-                      price, amount, filled_amount, status, created_at, updated_at
+                      price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             "#,
         )
         .bind(Utc::now())
@@ -335,7 +336,7 @@ impl OrderRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, user_id, order_type, order_side, base_mint, quote_mint,
-                   price, amount, filled_amount, status, created_at, updated_at
+                   price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
             FROM orders
             WHERE status IN ('pending', 'partial')
             ORDER BY base_mint, quote_mint,
@@ -364,6 +365,7 @@ impl OrderRepository {
             price: row.get("price"),
             amount: row.get("amount"),
             filled_amount: row.get("filled_amount"),
+            filled_quote_amount: row.get("filled_quote_amount"),
             status: row.get("status"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),

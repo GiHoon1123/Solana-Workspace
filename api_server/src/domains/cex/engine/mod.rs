@@ -445,6 +445,7 @@ pub fn entry_to_order(entry: &OrderEntry) -> crate::domains::cex::models::order:
         price: entry.price,
         amount: entry.amount,
         filled_amount: entry.filled_amount,
+        filled_quote_amount: Decimal::ZERO, // OrderEntry에는 filled_quote_amount가 없으므로 0으로 설정 (DB에서 조회 시 실제 값 사용)
         status,
         created_at: entry.created_at,
         updated_at: Utc::now(),

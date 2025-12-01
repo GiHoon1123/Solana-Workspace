@@ -212,6 +212,7 @@ impl OrderService {
             price: request.price,
             amount: order_amount,
             filled_amount: Decimal::ZERO,
+            filled_quote_amount: Decimal::ZERO,
             status: "pending".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),

@@ -560,11 +560,15 @@ pub(crate) fn process_submit_order(
             let total_filled_amount: Decimal = matches.iter()
                 .map(|m| m.amount)
                 .sum();
+            let total_filled_quote_amount: Decimal = matches.iter()
+                .map(|m| m.price * m.amount)
+                .sum();
             
             let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
                 order_id: order_after_match.id,
                 status: "filled".to_string(),
                 filled_amount: total_filled_amount,
+                filled_quote_amount: total_filled_quote_amount,
             };
             if let Err(e) = tx.send(db_cmd) {
                 eprintln!(
@@ -604,11 +608,15 @@ pub(crate) fn process_submit_order(
                 let total_filled_amount: Decimal = matches.iter()
                     .map(|m| m.amount)
                     .sum();
+                let total_filled_quote_amount: Decimal = matches.iter()
+                    .map(|m| m.price * m.amount)
+                    .sum();
                 
                 let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
                     order_id: order_after_match.id,
                     status: "partial".to_string(),
                     filled_amount: total_filled_amount,
+                    filled_quote_amount: total_filled_quote_amount,
                 };
                 if let Err(e) = tx.send(db_cmd) {
                     eprintln!(
@@ -712,11 +720,15 @@ pub(crate) fn process_submit_order(
             let total_filled_amount: Decimal = matches.iter()
                 .map(|m| m.amount)
                 .sum();
+            let total_filled_quote_amount: Decimal = matches.iter()
+                .map(|m| m.price * m.amount)
+                .sum();
             
             let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
                 order_id: order_after_match.id,
                 status: "filled".to_string(),
                 filled_amount: total_filled_amount,
+                filled_quote_amount: total_filled_quote_amount,
             };
             if let Err(e) = tx.send(db_cmd) {
                 eprintln!(
@@ -950,6 +962,7 @@ fn handle_cancel_order(
             order_id,
             status: "cancelled".to_string(),
             filled_amount: order.filled_amount,
+            filled_quote_amount: Decimal::ZERO, // 취소 시 filled_quote_amount는 0으로 유지 (이미 체결된 금액은 그대로)
         };
         if let Err(e) = tx.send(db_cmd) {
             eprintln!("Failed to send UpdateOrderStatus command for cancel: {}", e);
@@ -1573,11 +1586,11 @@ async fn flush_batch(
                     r#"
                     INSERT INTO orders (
                         id, user_id, order_type, order_side, base_mint, quote_mint,
-                        price, amount, filled_amount, status, created_at, updated_at
+                        price, amount, filled_amount, filled_quote_amount, status, created_at, updated_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                     ON CONFLICT (id) DO UPDATE SET
-                        updated_at = $12
+                        updated_at = $13
                     "#
                 )
                 .bind(order_id as i64)
@@ -1589,6 +1602,7 @@ async fn flush_batch(
                 .bind(&price)
                 .bind(&amount)
                 .bind(rust_decimal::Decimal::ZERO)  // filled_amount
+                .bind(rust_decimal::Decimal::ZERO)  // filled_quote_amount
                 .bind("pending")  // status
                 .bind(created_at)
                 .bind(created_at)
@@ -1601,21 +1615,41 @@ async fn flush_batch(
                 order_id,
                 status,
                 filled_amount,
+                filled_quote_amount,
             } => {
-                sqlx::query(
-                    r#"
-                    UPDATE orders
-                    SET status = $1, filled_amount = $2, updated_at = $3
-                    WHERE id = $4
-                    "#
-                )
-                .bind(&status)
-                .bind(&filled_amount)
-                .bind(chrono::Utc::now())
-                .bind(order_id as i64)
-                .execute(&mut *tx)
-                .await
-                .context("Failed to update order status")?;
+                // 취소 시에는 filled_quote_amount를 변경하지 않음 (기존 값 유지)
+                if status == "cancelled" {
+                    sqlx::query(
+                        r#"
+                        UPDATE orders
+                        SET status = $1, filled_amount = $2, updated_at = $3
+                        WHERE id = $4
+                        "#
+                    )
+                    .bind(&status)
+                    .bind(&filled_amount)
+                    .bind(chrono::Utc::now())
+                    .bind(order_id as i64)
+                    .execute(&mut *tx)
+                    .await
+                    .context("Failed to update order status")?;
+                } else {
+                    sqlx::query(
+                        r#"
+                        UPDATE orders
+                        SET status = $1, filled_amount = $2, filled_quote_amount = $3, updated_at = $4
+                        WHERE id = $5
+                        "#
+                    )
+                    .bind(&status)
+                    .bind(&filled_amount)
+                    .bind(&filled_quote_amount)
+                    .bind(chrono::Utc::now())
+                    .bind(order_id as i64)
+                    .execute(&mut *tx)
+                    .await
+                    .context("Failed to update order status")?;
+                }
             }
             
             DbCommand::InsertTrade {

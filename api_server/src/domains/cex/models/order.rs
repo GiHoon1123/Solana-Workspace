@@ -100,6 +100,13 @@ pub struct Order {
     #[schema(value_type = String, example = "0.0")]
     pub filled_amount: Decimal,
 
+    /// Filled quote amount (total USDT paid/received for executed trades)
+    /// 체결된 금액 (USDT 기준, 체결된 거래의 총 결제 금액)
+    /// For market orders, this is the sum of (price * amount) for all trades
+    /// 시장가 주문의 경우, 모든 체결의 (가격 * 수량) 합계
+    #[schema(value_type = String, example = "0.0")]
+    pub filled_quote_amount: Decimal,
+
     /// Order status: 'pending', 'partial', 'filled', or 'cancelled'
     /// 주문 상태: 'pending' (대기), 'partial' (부분체결), 'filled' (완료), 'cancelled' (취소)
     #[schema(example = "pending")]
