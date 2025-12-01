@@ -417,6 +417,20 @@ pub(crate) fn process_submit_order(
             }
             return Err(anyhow::anyhow!("Failed to lock balance: {}", e));
         }
+        
+        // DB Writer로 잔고 업데이트 명령 전송 (available 감소, locked 증가)
+        if let Some(tx) = db_tx {
+            let db_cmd = super::db_commands::DbCommand::UpdateBalance {
+                user_id: order.user_id,
+                mint: lock_mint.to_string(),
+                available_delta: Some(-lock_amount), // available 감소
+                locked_delta: Some(lock_amount), // locked 증가
+            };
+            if let Err(e) = tx.send(db_cmd) {
+                eprintln!("Failed to send DB update command for balance lock: order_id={}, user_id={}, mint={}, amount={}, error={}",
+                    order.id, order.user_id, lock_mint, lock_amount, e);
+            }
+        }
     }
     
     // 3. WAL 메시지 발행 (OrderCreated) - 잔고 잠금 후!

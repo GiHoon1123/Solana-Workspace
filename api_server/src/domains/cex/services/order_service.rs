@@ -156,21 +156,8 @@ impl OrderService {
         let order_id = OrderIdGenerator::next();
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 4. 엔진에 잔고 잠금 요청
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 매수: quote_mint (USDT) 잠금
-        // 매도: base_mint (SOL 등) 잠금
-        // 엔진의 인메모리 잔고에서 즉시 잠금 (마이크로초)
-        {
-            let engine_guard = self.engine.lock().await;
-            engine_guard
-                .lock_balance(user_id, &required_mint, required_amount)
-                .await
-                .context("Failed to lock balance in engine")?;
-        }
-
-        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-        // 5. 엔진에 주문 즉시 제출 (블로킹 없음!)
+        // 4. 엔진에 주문 즉시 제출 (블로킹 없음!)
+        // 주의: 잔고 잠금은 process_submit_order에서 처리됨 (중복 방지)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // ID 생성기로 생성한 ID 사용
         let order_entry = OrderEntry {
