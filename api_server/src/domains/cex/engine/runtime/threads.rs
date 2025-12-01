@@ -584,6 +584,94 @@ pub(crate) fn process_submit_order(
         }
     }
     
+    // 9. 완전히 체결된 주문의 남은 locked 잔고 해제
+    // ============================================
+    // 문제: 주문 생성 시 lock한 금액과 실제 체결 금액이 다를 수 있음
+    // 
+    // 예시 (시장가 매수):
+    // - 주문 생성 시: quote_amount = 1000 USDT 전체를 lock
+    // - 실제 체결: 800 USDT만 체결 (remaining_quote_amount = 0, 완전 체결)
+    // - transfer로 800 USDT만 locked에서 차감
+    // - 남은 locked = 200 USDT (이걸 unlock해야 함)
+    // 
+    // 예시 (지정가 주문):
+    // - 주문 생성 시: price * amount = 100 * 10 = 1000 USDT를 lock
+    // - 실제 체결: 100 * 10 = 1000 USDT 체결 (remaining_amount = 0, 완전 체결)
+    // - transfer로 1000 USDT를 locked에서 차감
+    // - 남은 locked = 0 (정확히 일치)
+    // 
+    // 하지만 가격이 변동하거나 부분 체결 후 완전 체결되면 차이가 있을 수 있음
+    // 따라서 완전히 체결된 주문의 경우 남은 locked를 unlock해야 함
+    // ============================================
+    let is_fully_filled_after_match = if let Some(remaining_quote) = order_after_match.remaining_quote_amount {
+        // 시장가 매수: remaining_quote_amount가 0이면 완전 체결
+        remaining_quote <= Decimal::ZERO
+    } else {
+        // 지정가 주문 또는 시장가 매도: remaining_amount가 0이면 완전 체결
+        order_after_match.remaining_amount == Decimal::ZERO
+    };
+    
+    // 완전히 체결된 주문의 경우, 남은 locked 잔고 해제
+    if is_fully_filled_after_match {
+        let mut executor_guard = executor.lock();
+        
+        // 주문 타입에 따라 unlock할 mint와 amount 계산
+        let (unlock_mint, unlock_amount) = if order_after_match.order_type == "buy" {
+            // 매수 주문: quote_mint (USDT) 잠금 해제
+            if let Some(remaining_quote) = order_after_match.remaining_quote_amount {
+                // 시장가 매수: 남은 quote_amount만큼 unlock
+                // 완전 체결되었으므로 remaining_quote는 0이지만,
+                // lock한 금액과 실제 체결 금액의 차이를 계산해야 함
+                // 
+                // lock한 금액: initial_quote_amount
+                // 실제 체결 금액: matches의 총합
+                let total_quote_used: Decimal = matches.iter()
+                    .map(|m| m.price * m.amount)
+                    .sum();
+                let initial_locked = initial_quote_amount.unwrap_or(Decimal::ZERO);
+                let remaining_locked = initial_locked - total_quote_used;
+                
+                (&order_after_match.quote_mint, remaining_locked)
+            } else {
+                // 지정가 매수: price * remaining_amount만큼 unlock
+                // 완전 체결되었으므로 remaining_amount는 0
+                // 하지만 lock한 금액과 실제 체결 금액의 차이를 계산해야 함
+                let total_quote_used: Decimal = matches.iter()
+                    .map(|m| m.price * m.amount)
+                    .sum();
+                let initial_locked = order_after_match.price.unwrap_or(Decimal::ZERO) * initial_amount;
+                let remaining_locked = initial_locked - total_quote_used;
+                
+                (&order_after_match.quote_mint, remaining_locked)
+            }
+        } else {
+            // 매도 주문: base_mint (SOL 등) 잠금 해제
+            // 완전 체결되었으므로 remaining_amount는 0
+            // 하지만 lock한 금액과 실제 체결 금액의 차이를 계산해야 함
+            let total_amount_used: Decimal = matches.iter()
+                .map(|m| m.amount)
+                .sum();
+            let remaining_locked = initial_amount - total_amount_used;
+            
+            (&order_after_match.base_mint, remaining_locked)
+        };
+        
+        // 남은 locked가 있으면 unlock
+        if unlock_amount > Decimal::ZERO {
+            if let Err(e) = executor_guard.unlock_balance_for_cancel(
+                order_after_match.id,
+                order_after_match.user_id,
+                unlock_mint,
+                unlock_amount,
+            ) {
+                eprintln!(
+                    "[Order Submit] Failed to unlock remaining balance for fully filled order {}: user_id={}, mint={}, amount={}, error={}",
+                    order_after_match.id, order_after_match.user_id, unlock_mint, unlock_amount, e
+                );
+            }
+        }
+    }
+    
     Ok(matches)
 }
 
