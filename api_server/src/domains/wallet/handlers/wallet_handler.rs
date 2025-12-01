@@ -41,15 +41,15 @@ pub async fn create_wallet(
         .map_err(|e: WalletError| -> (StatusCode, Json<serde_json::Value>) { e.into() })?;
 
     // 2. 모의거래소 초기 잔액 설정
-    // SOL: 1,000,000,000
-    // USDT: 1,000,000,000
+    // SOL: 10,000
+    // USDT: 10,000
     let engine = app_state.engine.lock().await;
     
     // SOL 초기 잔액 설정
     engine.update_balance(
         user_id,
         "SOL",
-        Decimal::new(1_000_000_000, 0),
+        Decimal::new(10_000, 0),
     ).await
     .map_err(|e| {
         (
@@ -64,7 +64,7 @@ pub async fn create_wallet(
     engine.update_balance(
         user_id,
         "USDT",
-        Decimal::new(1_000_000_000, 0),
+        Decimal::new(10_000, 0),
     ).await
     .map_err(|e| {
         (
