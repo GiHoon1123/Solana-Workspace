@@ -500,24 +500,10 @@ pub(crate) fn process_submit_order(
         (matches, order_after_match)
     };
     
-    // 8. 시장가 주문 완전 체결 확인 및 처리
-    let is_fully_filled = if is_market_order {
-        // 시장가 주문: 완전히 체결되었는지 확인
-        if let Some(remaining_quote) = order_after_match.remaining_quote_amount {
-            // 시장가 매수 (금액 기반): remaining_quote_amount가 0이면 완전 체결
-            remaining_quote <= Decimal::ZERO
-        } else {
-            // 시장가 매도 (수량 기반): remaining_amount가 0이면 완전 체결
-            order_after_match.remaining_amount == Decimal::ZERO
-        }
-    } else {
-        // 지정가 주문: 항상 성공 (부분 체결되어도 오더북에 추가됨)
-        true
-    };
-    
-    // 시장가 주문이 완전히 체결되지 않았으면 잔고 잠금 해제 및 에러 반환
-    if is_market_order && !is_fully_filled {
-        // 부분 체결이 있으면 먼저 처리
+    // 8. 시장가 주문 처리 (IOC 방식: 오더북에 있는 만큼만 체결, 남은 잔량은 즉시 취소)
+    // 시장가 주문은 부분 체결되어도 성공으로 처리하고 'filled' 상태로 저장
+    if is_market_order {
+        // 체결 처리
         {
             let mut executor_guard = executor.lock();
             for match_result in &matches {
@@ -527,7 +513,7 @@ pub(crate) fn process_submit_order(
             }
         }
         
-        // 남은 잔고 잠금 해제
+        // 남은 잔고 잠금 해제 (IOC: 남은 잔량은 즉시 취소)
         {
             let mut executor_guard = executor.lock();
             let (unlock_mint, unlock_amount) = if order_after_match.order_type == "buy" {
@@ -565,49 +551,30 @@ pub(crate) fn process_submit_order(
             }
         }
         
-        return Err(anyhow::anyhow!(
-            "Market order partially filled or not filled at all. Matches: {}, Remaining: {}",
-            matches.len(),
-            if order_after_match.order_type == "buy" {
-                order_after_match.remaining_quote_amount.unwrap_or(Decimal::ZERO)
-            } else {
-                order_after_match.remaining_amount
-            }
-        ));
-    }
-    
-    // 시장가 주문이 매칭되지 않았으면 (matches가 비어있음) 잔고 잠금 해제 및 에러 반환
-    if is_market_order && matches.is_empty() {
-        // 잔고 잠금 해제
-        {
-            let mut executor_guard = executor.lock();
-            let (unlock_mint, unlock_amount) = if order_after_match.order_type == "buy" {
-                // 시장가 매수: 전체 quote_amount만큼 USDT 잠금 해제
-                let amount = initial_quote_amount.unwrap_or(Decimal::ZERO);
-                (&order_after_match.quote_mint, amount)
-            } else {
-                // 시장가 매도: 전체 amount만큼 SOL 등 잠금 해제
-                (&order_after_match.base_mint, initial_amount)
-            };
+        // 시장가 주문 상태를 'filled'로 저장 (부분 체결이어도 filled로 표시)
+        if let Some(tx) = db_tx {
+            let total_filled_amount: Decimal = matches.iter()
+                .map(|m| m.amount)
+                .sum();
             
-            if unlock_amount > Decimal::ZERO {
-                if let Err(e) = executor_guard.unlock_balance_for_cancel(
-                    order_after_match.id,
-                    order_after_match.user_id,
-                    unlock_mint,
-                    unlock_amount,
-                ) {
-                    eprintln!("Failed to unlock balance: {}", e);
-                }
+            let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
+                order_id: order_after_match.id,
+                status: "filled".to_string(),
+                filled_amount: total_filled_amount,
+            };
+            if let Err(e) = tx.send(db_cmd) {
+                eprintln!(
+                    "[Order Submit] Failed to send UpdateOrderStatus command for market order {}: {}",
+                    order_after_match.id, e
+                );
             }
         }
         
-        return Err(anyhow::anyhow!(
-            "Market order cannot be filled: no matching orders in orderbook"
-        ));
+        // 시장가 주문은 항상 성공으로 처리 (IOC 방식)
+        return Ok(matches);
     }
     
-    // 8. 체결 처리 (정상 케이스: 지정가 주문 또는 완전히 체결된 시장가 주문)
+    // 8. 체결 처리 (정상 케이스: 지정가 주문)
     {
         let mut executor_guard = executor.lock();
         for match_result in &matches {
@@ -649,17 +616,11 @@ pub(crate) fn process_submit_order(
         }
     }
     
-    // 9. 완전히 체결된 주문의 남은 locked 잔고 해제
+    // 9. 완전히 체결된 지정가 주문의 남은 locked 잔고 해제
     // ============================================
-    // 문제: 주문 생성 시 lock한 금액과 실제 체결 금액이 다를 수 있음
+    // 주문 생성 시 lock한 금액과 실제 체결 금액이 다를 수 있음
     // 
-    // 예시 (시장가 매수 완전 체결):
-    // - 주문 생성 시: quote_amount = 250,000,000 USDT 전체를 lock
-    // - 실제 체결: 249,662,553.6 USDT만 체결 (가격 변동으로 인해)
-    // - transfer로 249,662,553.6 USDT만 locked에서 차감
-    // - 남은 locked = 337,446.4 USDT (이걸 unlock해야 함)
-    // 
-    // 예시 (지정가 주문 완전 체결):
+    // 예시 (지정가 매수 완전 체결):
     // - 주문 생성 시: price * amount = 100 * 10 = 1000 USDT를 lock
     // - 실제 체결: 100 * 10 = 1000 USDT 체결 (remaining_amount = 0, 완전 체결)
     // - transfer로 1000 USDT를 locked에서 차감
@@ -668,20 +629,12 @@ pub(crate) fn process_submit_order(
     // 하지만 가격이 변동하거나 부분 체결 후 완전 체결되면 차이가 있을 수 있음
     // 따라서 완전히 체결된 주문의 경우 남은 locked를 unlock해야 함
     // 
-    // 참고: 부분 체결 케이스는 510-532 라인에서 이미 처리됨
+    // 참고: 시장가 주문은 위에서 이미 처리됨 (IOC 방식)
     // ============================================
     
-    // 완전 체결 판단 로직
-    // 시장가 매수: remaining_quote_amount가 None이거나 Some(0)이면 완전 체결
-    // 시장가 매도: remaining_amount가 0이면 완전 체결
+    // 완전 체결 판단 로직 (지정가 주문만)
     // 지정가 주문: remaining_amount가 0이면 완전 체결
-    let is_fully_filled_after_match = if order_after_match.order_side == "market" && order_after_match.order_type == "buy" {
-        // 시장가 매수: remaining_quote_amount가 None이거나 Some(0)이면 완전 체결
-        order_after_match.remaining_quote_amount.map_or(true, |q| q <= Decimal::ZERO)
-    } else {
-        // 시장가 매도 또는 지정가 주문: remaining_amount가 0이면 완전 체결
-        order_after_match.remaining_amount == Decimal::ZERO
-    };
+    let is_fully_filled_after_match = order_after_match.remaining_amount == Decimal::ZERO;
     
     // 완전히 체결된 주문의 경우, 남은 locked 잔고 해제
     if is_fully_filled_after_match {
