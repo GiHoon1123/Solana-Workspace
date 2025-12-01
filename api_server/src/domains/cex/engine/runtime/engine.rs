@@ -323,20 +323,20 @@ impl HighPerformanceEngine {
         
         // 주문 명령 채널 (크기: 10,000)
         // SPSC 패턴: API Handler (Producer) → Engine Thread (Consumer)
-        let (order_tx, order_rx) = bounded(10_000);
+        let (order_tx, order_rx) = bounded(100_000);
         
         // 잔고 업데이트 채널 (크기: 10,000)
         // SPSC 패턴: 외부 입금/출금 서비스 (Producer) → Engine Thread (Consumer)
         // 우선순위: 주문 큐보다 높음 (입금이 선행되어야 주문 가능)
-        let (balance_tx, balance_rx) = bounded(10_000);
+        let (balance_tx, balance_rx) = bounded(100_000);
         
         // WAL 메시지 채널 (크기: 10,000)
         // SPSC 패턴: Engine Thread (Producer) → WAL Thread (Consumer)
-        let (wal_tx_inner, wal_rx) = bounded(10_000);
+        let (wal_tx_inner, wal_rx) = bounded(100_000);
         
         // DB Writer 채널 (크기: 10,000)
         // SPSC 패턴: Engine Thread (Producer) → DB Writer Thread (Consumer)
-        let (db_tx_inner, db_rx) = bounded(10_000);
+        let (db_tx_inner, db_rx) = bounded(100_000);
         
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 2. 컴포넌트 초기화
@@ -575,6 +575,7 @@ impl HighPerformanceEngine {
         let executor = Arc::clone(&self.executor);
         let running = Arc::clone(&self.running);
         
+        let db_for_thread = self.db.clone();
         let engine_thread = thread::spawn(move || {
             super::threads::engine_thread_loop(
                 order_rx,
@@ -585,6 +586,7 @@ impl HighPerformanceEngine {
                 matcher,
                 executor,
                 running,
+                db_for_thread,
             );
         });
         self.engine_thread = Some(engine_thread);

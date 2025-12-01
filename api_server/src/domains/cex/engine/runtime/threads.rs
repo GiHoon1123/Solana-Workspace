@@ -15,6 +15,7 @@ use crossbeam::channel::Receiver;
 use parking_lot::{RwLock, Mutex};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
+use crate::shared::database::Database;
 
 use crate::domains::cex::engine::types::{TradingPair, OrderEntry, MatchResult};
 use crate::domains::cex::engine::orderbook::OrderBook;
@@ -97,6 +98,7 @@ pub fn engine_thread_loop(
     matcher: Arc<Matcher>,
     executor: Arc<Mutex<Executor>>,
     running: Arc<std::sync::atomic::AtomicBool>,
+    db: Option<Database>,
 ) {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 1. 코어 고정 (Core 0)
@@ -197,8 +199,10 @@ pub fn engine_thread_loop(
                             trading_pair,
                             response,
                             wal_tx.as_ref(),
+                            db_tx.as_ref(),
                             &orderbooks,
                             &executor,
+                            db.clone(),
                         );
                     }
                     OrderCommand::GetOrderbook { trading_pair, depth, response } => {
@@ -276,8 +280,10 @@ pub fn engine_thread_loop(
                                             trading_pair,
                                             response,
                                             wal_tx.as_ref(),
+                                            db_tx.as_ref(),
                                             &orderbooks,
                                             &executor,
+                                            db.clone(),
                                         );
                                     }
                                     OrderCommand::GetOrderbook { trading_pair, depth, response } => {
@@ -598,6 +604,37 @@ pub(crate) fn process_submit_order(
         }
     }
     
+    // 8-1. 지정가 주문 부분 체결 시 상태 업데이트
+    // ============================================
+    // 지정가 주문은 부분 체결되어도 OrderBook에 남아있음
+    // 부분 체결 시 상태를 'partial'로 업데이트해야 함
+    // ============================================
+    if !is_market_order && !matches.is_empty() {
+        // 지정가 주문이고 체결이 발생했음
+        let is_partially_filled = order_after_match.remaining_amount > Decimal::ZERO;
+        
+        if is_partially_filled {
+            // 부분 체결: 상태를 'partial'로 업데이트
+            if let Some(tx) = db_tx {
+                let total_filled_amount: Decimal = matches.iter()
+                    .map(|m| m.amount)
+                    .sum();
+                
+                let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
+                    order_id: order_after_match.id,
+                    status: "partial".to_string(),
+                    filled_amount: total_filled_amount,
+                };
+                if let Err(e) = tx.send(db_cmd) {
+                    eprintln!(
+                        "[Order Submit] Failed to send UpdateOrderStatus command for partially filled order {}: {}",
+                        order_after_match.id, e
+                    );
+                }
+            }
+        }
+    }
+    
     // 9. 완전히 체결된 주문의 남은 locked 잔고 해제
     // ============================================
     // 문제: 주문 생성 시 lock한 금액과 실제 체결 금액이 다를 수 있음
@@ -678,6 +715,43 @@ pub(crate) fn process_submit_order(
                     "[Order Submit] Failed to unlock remaining balance for fully filled order {}: user_id={}, mint={}, amount={}, error={}",
                     order_after_match.id, order_after_match.user_id, unlock_mint, unlock_amount, e
                 );
+            } else {
+                // Unlock 성공 시 DB Writer로 잔고 업데이트 명령 전송
+                // 남은 locked를 available로 이동 (available 증가, locked 감소)
+                if let Some(tx) = db_tx {
+                    let db_cmd = super::db_commands::DbCommand::UpdateBalance {
+                        user_id: order_after_match.user_id,
+                        mint: unlock_mint.to_string(),
+                        available_delta: Some(unlock_amount), // available 증가
+                        locked_delta: Some(-unlock_amount), // locked 감소
+                    };
+                    if let Err(e) = tx.send(db_cmd) {
+                        eprintln!(
+                            "[Order Submit] Failed to send UpdateBalance command for unlock: order_id={}, user_id={}, mint={}, amount={}, error={}",
+                            order_after_match.id, order_after_match.user_id, unlock_mint, unlock_amount, e
+                        );
+                    }
+                }
+            }
+        }
+        
+        // 완전히 체결된 주문의 상태를 'filled'로 업데이트
+        // DB Writer로 주문 상태 업데이트 명령 전송
+        if let Some(tx) = db_tx {
+            let total_filled_amount: Decimal = matches.iter()
+                .map(|m| m.amount)
+                .sum();
+            
+            let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
+                order_id: order_after_match.id,
+                status: "filled".to_string(),
+                filled_amount: total_filled_amount,
+            };
+            if let Err(e) = tx.send(db_cmd) {
+                eprintln!(
+                    "[Order Submit] Failed to send UpdateOrderStatus command for order {}: {}",
+                    order_after_match.id, e
+                );
             }
         }
     }
@@ -700,8 +774,10 @@ fn handle_cancel_order(
     trading_pair: TradingPair,
     response: tokio::sync::oneshot::Sender<Result<OrderEntry>>,
     wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     orderbooks: &Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
     executor: &Arc<Mutex<Executor>>,
+    db: Option<Database>,
 ) {
     // 1. OrderBook에서 주문 찾기
     let mut orderbooks_guard = orderbooks.write();
@@ -785,12 +861,79 @@ fn handle_cancel_order(
     
     let order_type = found_order.as_ref().map(|o| o.order_type.clone());
     
-    // 주문을 찾지 못함
-    let order = match found_order {
-        Some(o) => o,
+    // 3. OrderBook에서 찾지 못했으면 DB에서 조회
+    let (order, from_db) = match found_order {
+        Some(o) => (o, false),
         None => {
-            let _ = response.send(Err(anyhow::anyhow!("Order not found")));
-            return;
+            // OrderBook에서 찾지 못함 - DB에서 조회
+            if let Some(db) = db {
+                use crate::shared::database::repositories::cex::order_repository::OrderRepository;
+                let order_repo = OrderRepository::new(db.pool().clone());
+                
+                // DB에서 주문 조회
+                match tokio::runtime::Handle::try_current() {
+                    Ok(handle) => {
+                        match handle.block_on(order_repo.get_by_id(order_id)) {
+                            Ok(Some(db_order)) => {
+                                // 권한 확인
+                                if db_order.user_id != user_id {
+                                    let _ = response.send(Err(anyhow::anyhow!("Unauthorized: You don't own this order")));
+                                    return;
+                                }
+                                
+                                // 완전히 체결된 주문은 취소 불가
+                                if db_order.status == "filled" {
+                                    let _ = response.send(Err(anyhow::anyhow!("Cannot cancel order: Order is already filled")));
+                                    return;
+                                }
+                                
+                                // 취소된 주문은 취소 불가
+                                if db_order.status == "cancelled" {
+                                    let _ = response.send(Err(anyhow::anyhow!("Cannot cancel order: Order is already cancelled")));
+                                    return;
+                                }
+                                
+                                // DB 주문을 OrderEntry로 변환
+                                let order_entry = OrderEntry {
+                                    id: db_order.id,
+                                    user_id: db_order.user_id,
+                                    order_type: db_order.order_type,
+                                    order_side: db_order.order_side,
+                                    base_mint: db_order.base_mint,
+                                    quote_mint: db_order.quote_mint,
+                                    price: db_order.price,
+                                    amount: db_order.amount,
+                                    quote_amount: None, // DB Order에는 quote_amount 필드가 없으므로 None
+                                    filled_amount: db_order.filled_amount,
+                                    remaining_amount: db_order.amount - db_order.filled_amount,
+                                    remaining_quote_amount: None,
+                                    created_at: db_order.created_at,
+                                };
+                                
+                                // DB에서 주문을 찾았으므로 취소 처리 계속 진행
+                                (order_entry, true)
+                            }
+                            Ok(None) => {
+                                let _ = response.send(Err(anyhow::anyhow!("Order not found")));
+                                return;
+                            }
+                            Err(e) => {
+                                let _ = response.send(Err(anyhow::anyhow!("Failed to query order from database: {}", e)));
+                                return;
+                            }
+                        }
+                    }
+                    Err(_) => {
+                        // Tokio 런타임이 없으면 DB 조회 불가
+                        let _ = response.send(Err(anyhow::anyhow!("Order not found in OrderBook and cannot query database")));
+                        return;
+                    }
+                }
+            } else {
+                // DB가 없으면 OrderBook에서만 찾기
+                let _ = response.send(Err(anyhow::anyhow!("Order not found")));
+                return;
+            }
         }
     };
     
@@ -805,7 +948,7 @@ fn handle_cancel_order(
     }
     
     // 4. 잔고 잠금 해제 (remaining_amount만큼)
-    let order_type_str = order_type.as_deref().unwrap_or("buy");
+    let order_type_str = order.order_type.as_str();
     let unlock_mint = if order_type_str == "buy" {
         &order.quote_mint  // 매수: USDT 잠금 해제
     } else {
@@ -830,7 +973,32 @@ fn handle_cancel_order(
         }
     }
     
-    // 5. 취소된 주문 반환
+    // 5. DB에 주문 상태 업데이트 (cancelled)
+    if let Some(tx) = db_tx {
+        let db_cmd = super::db_commands::DbCommand::UpdateOrderStatus {
+            order_id,
+            status: "cancelled".to_string(),
+            filled_amount: order.filled_amount,
+        };
+        if let Err(e) = tx.send(db_cmd) {
+            eprintln!("Failed to send UpdateOrderStatus command for cancel: {}", e);
+        }
+    }
+    
+    // 6. 잔고 업데이트를 DB에 반영 (unlock)
+    if let Some(tx) = db_tx {
+        let db_cmd = super::db_commands::DbCommand::UpdateBalance {
+            user_id,
+            mint: unlock_mint.to_string(),
+            available_delta: Some(unlock_amount), // available 증가
+            locked_delta: Some(-unlock_amount), // locked 감소
+        };
+        if let Err(e) = tx.send(db_cmd) {
+            eprintln!("Failed to send UpdateBalance command for unlock: {}", e);
+        }
+    }
+    
+    // 7. 취소된 주문 반환
     let _ = response.send(Ok(order));
 }
 
