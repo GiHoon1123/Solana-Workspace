@@ -4,7 +4,7 @@ use rust_decimal::Decimal;
 use crate::shared::database::{Database, UserRepository};
 use crate::domains::auth::models::user::User;
 use crate::domains::auth::services::AuthService;
-use crate::domains::cex::engine::{Engine, runtime::HighPerformanceEngine};
+use crate::domains::cex::engine::runtime::HighPerformanceEngine;
 use crate::domains::bot::models::BotConfig;
 
 /// 봇 관리자
@@ -124,10 +124,54 @@ impl BotManager {
         Ok(())
     }
     
-    /// 봇 잔고 설정 (엔진 시작 후)
+    /// 봇 잔고를 DB에 직접 쓰기 (엔진 시작 전)
+    /// Set bot balances in database (before engine start)
+    /// 
+    /// 엔진이 시작되기 전에 DB에 직접 잔고를 쓰고,
+    /// 엔진 시작 시 DB에서 자동으로 로드되도록 합니다.
+    pub async fn set_bot_balances_in_db(&self) -> Result<()> {
+        use crate::shared::database::repositories::cex::balance_repository::UserBalanceRepository;
+        
+        let bot1_id = self.bot1_user.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Bot1 not initialized"))?
+            .id;
+        let bot2_id = self.bot2_user.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Bot2 not initialized"))?
+            .id;
+        
+        // 1,000,000,000 SOL, 1,000,000,000 USDT
+        let huge_balance = Decimal::new(1_000_000_000, 0);
+        
+        use crate::domains::cex::models::balance::UserBalanceUpdate;
+        
+        let balance_repo = UserBalanceRepository::new(self.db.pool().clone());
+        
+        // Bot 1 자산 설정 (DB에 직접 쓰기)
+        let update1 = UserBalanceUpdate {
+            available_delta: Some(huge_balance),
+            locked_delta: None,
+        };
+        balance_repo.update_balance(bot1_id, "SOL", &update1).await
+            .context("Failed to set bot1 SOL balance in DB")?;
+        balance_repo.update_balance(bot1_id, "USDT", &update1).await
+            .context("Failed to set bot1 USDT balance in DB")?;
+        
+        // Bot 2 자산 설정 (DB에 직접 쓰기)
+        balance_repo.update_balance(bot2_id, "SOL", &update1).await
+            .context("Failed to set bot2 SOL balance in DB")?;
+        balance_repo.update_balance(bot2_id, "USDT", &update1).await
+            .context("Failed to set bot2 USDT balance in DB")?;
+        
+        Ok(())
+    }
+    
+    /// 봇 잔고 설정 (엔진 시작 후 - 더 이상 사용하지 않음)
     /// Set bot balances (after engine start)
     /// 
     /// 엔진이 시작된 후에 호출해야 합니다.
+    /// 
+    /// 주의: 이제는 사용하지 않습니다. `set_bot_balances_in_db`를 사용하세요.
+    #[allow(dead_code)]
     pub async fn initialize_bots(&mut self) -> Result<()> {
         let bot1_id = self.bot1_user.as_ref()
             .ok_or_else(|| anyhow::anyhow!("Bot1 not initialized"))?

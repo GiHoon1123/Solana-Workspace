@@ -203,8 +203,52 @@ impl Executor {
         }
         
         // ============================================
-        // Step 4: WAL에 잔고 업데이트 메시지 발행
+        // Step 4: WAL에 잔고 업데이트 메시지 발행 및 DB Writer로 잔고 업데이트 명령 전송
         // ============================================
+        
+        // 계산: 총 거래 금액 (이미 위에서 계산했지만 재사용)
+        let total_value = match_result.price * match_result.amount;
+        
+        // 매수자: USDT 차감 (locked에서 차감됨)
+        // 매도자: USDT 증가 (available에 추가됨)
+        // 매도자: SOL 차감 (locked에서 차감됨)
+        // 매수자: SOL 증가 (available에 추가됨)
+        
+        if let Some(db_sender) = &self.db_sender {
+            // 매수자 USDT 잔고 업데이트 (locked에서 차감됨)
+            let _ = db_sender.send(DbCommand::UpdateBalance {
+                user_id: match_result.buyer_id,
+                mint: match_result.quote_mint.clone(),
+                available_delta: None, // available은 변경 없음 (locked에서 차감)
+                locked_delta: Some(-total_value), // locked에서 차감
+            });
+            
+            // 매도자 USDT 잔고 업데이트 (available에 추가됨)
+            let _ = db_sender.send(DbCommand::UpdateBalance {
+                user_id: match_result.seller_id,
+                mint: match_result.quote_mint.clone(),
+                available_delta: Some(total_value), // available에 추가
+                locked_delta: None, // locked는 변경 없음
+            });
+            
+            // 매도자 기준 자산 잔고 업데이트 (locked에서 차감됨)
+            let _ = db_sender.send(DbCommand::UpdateBalance {
+                user_id: match_result.seller_id,
+                mint: match_result.base_mint.clone(),
+                available_delta: None, // available은 변경 없음 (locked에서 차감)
+                locked_delta: Some(-match_result.amount), // locked에서 차감
+            });
+            
+            // 매수자 기준 자산 잔고 업데이트 (available에 추가됨)
+            let _ = db_sender.send(DbCommand::UpdateBalance {
+                user_id: match_result.buyer_id,
+                mint: match_result.base_mint.clone(),
+                available_delta: Some(match_result.amount), // available에 추가
+                locked_delta: None, // locked는 변경 없음
+            });
+        }
+        
+        // WAL에도 기록 (복구용)
         if let Some(sender) = &self.wal_sender {
             // 매수자 USDT 잔고
             if let Some(buyer_usdt) = self.balance_cache.get_balance(match_result.buyer_id, &match_result.quote_mint) {

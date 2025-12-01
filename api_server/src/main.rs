@@ -200,26 +200,28 @@ async fn main() {
     eprintln!("[Main] Bots prepared: bot1@bot.com (buy), bot2@bot.com (sell)");
     
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // 봇 잔고를 DB에 직접 쓰기 (엔진 시작 전)
+    // 엔진 시작 시 DB에서 자동으로 로드됩니다
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    eprintln!("[Main] Setting bot balances in database (before engine start)...");
+    bot_manager.set_bot_balances_in_db().await
+        .expect("Failed to set bot balances in DB");
+    
+    eprintln!("[Main] Bot balances set in database");
+    
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // 엔진 시작 (DB에서 데이터 로드 및 스레드 시작)
     // 봇 데이터 삭제 후 실행되므로 활성 주문 수가 크게 줄어듭니다
+    // 봇 잔고는 이미 DB에 있으므로 엔진 시작 시 자동으로 로드됩니다
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    eprintln!("[Main] Starting engine (after bot data cleanup)...");
+    eprintln!("[Main] Starting engine (will load bot balances from DB)...");
     {
         let mut engine_guard = app_state.engine.lock().await;
         engine_guard.start().await
             .expect("Failed to start engine");
     }
     
-    eprintln!("[Main] Engine started successfully");
-    
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // 봇 잔고 설정 (엔진 시작 후)
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    eprintln!("[Main] Setting bot balances (after engine start)...");
-    bot_manager.initialize_bots().await
-        .expect("Failed to initialize bots");
-    
-    eprintln!("[Main] Bots initialized: bot1@bot.com (buy), bot2@bot.com (sell)");
+    eprintln!("[Main] Engine started successfully (bot balances loaded from DB)");
     
     // 바이낸스 클라이언트 생성
     let binance_client = BinanceClient::new(bot_config.binance_ws_url.clone());
