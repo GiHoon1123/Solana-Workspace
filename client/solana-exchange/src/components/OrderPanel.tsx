@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { apiClient, Balance, CreateOrderRequest } from '@/lib/api';
+import { useAlert } from './AlertToast';
 
 type OrderType = 'buy' | 'sell';
 type OrderSide = 'limit' | 'market';
@@ -18,6 +19,7 @@ export default function OrderPanel() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const { showAlert, AlertContainer } = useAlert();
 
   const wsTickerRef = useRef<WebSocket | null>(null);
 
@@ -291,7 +293,9 @@ export default function OrderPanel() {
       try {
         const order = await apiClient.createOrder(request);
       
-        setSuccess(`${orderType === 'buy' ? '매수' : '매도'} 주문이 생성되었습니다. (ID: ${order.id})`);
+        const successMessage = `${orderType === 'buy' ? '매수' : '매도'} 주문이 생성되었습니다. (ID: ${order.id})`;
+        setSuccess(successMessage);
+        showAlert(successMessage, 'success');
         
         // 폼 초기화
         setPrice('');
@@ -343,6 +347,7 @@ export default function OrderPanel() {
         }
       }
       setError(errorMessage);
+      showAlert(errorMessage, 'error');
     } finally {
       setLoading(false);
     }
@@ -541,6 +546,7 @@ export default function OrderPanel() {
           {loading ? '주문 처리 중...' : '주문하기'}
         </button>
       </form>
+      <AlertContainer />
     </div>
   );
 }

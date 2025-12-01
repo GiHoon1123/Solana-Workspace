@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient, UserResponse, Balance } from '@/lib/api';
 import { useRouter } from 'next/navigation';
+import { useAlert } from '@/components/AlertToast';
 
 interface Wallet {
   id: number;
@@ -28,6 +29,7 @@ export default function MyPagePage() {
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<UserResponse | null>(null);
   const [exchangeBalances, setExchangeBalances] = useState<Balance[]>([]);
+  const { showAlert, AlertContainer } = useAlert();
 
   useEffect(() => {
     const fetchMyPageData = async () => {
@@ -112,9 +114,12 @@ export default function MyPagePage() {
       await apiClient.createWallet();
       // 지갑 생성 후 다시 조회
       await fetchWalletData();
+      showAlert('지갑이 성공적으로 생성되었습니다.', 'success');
     } catch (err) {
       console.error('지갑 생성 실패:', err);
-      setError(err instanceof Error ? err.message : '지갑 생성에 실패했습니다.');
+      const errorMessage = err instanceof Error ? err.message : '지갑 생성에 실패했습니다.';
+      setError(errorMessage);
+      showAlert(errorMessage, 'error');
     } finally {
       setCreating(false);
     }
@@ -259,6 +264,7 @@ export default function MyPagePage() {
           </div>
         )}
       </div>
+      <AlertContainer />
     </main>
   );
 }
