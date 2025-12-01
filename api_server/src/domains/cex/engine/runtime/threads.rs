@@ -224,6 +224,7 @@ pub fn engine_thread_loop(
                             amount,
                             response,
                             wal_tx.as_ref(),
+                            db_tx.as_ref(),
                             &executor,
                         );
                     }
@@ -234,6 +235,7 @@ pub fn engine_thread_loop(
                             amount,
                             response,
                             wal_tx.as_ref(),
+                            db_tx.as_ref(),
                             &executor,
                         );
                     }
@@ -301,6 +303,7 @@ pub fn engine_thread_loop(
                                             amount,
                                             response,
                                             wal_tx.as_ref(),
+                                            db_tx.as_ref(),
                                             &executor,
                                         );
                                     }
@@ -311,6 +314,7 @@ pub fn engine_thread_loop(
                                             amount,
                                             response,
                                             wal_tx.as_ref(),
+                                            db_tx.as_ref(),
                                             &executor,
                                         );
                                     }
@@ -826,24 +830,27 @@ fn handle_lock_balance(
     amount: rust_decimal::Decimal,
     response: tokio::sync::oneshot::Sender<Result<()>>,
     wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     executor: &Arc<Mutex<Executor>>,
 ) {
     let mut executor = executor.lock();
     
-    // WAL 메시지 발행
-    if let Some(tx) = wal_tx {
-        let wal_entry = WalEntry::BalanceLocked {
-            user_id,
-            mint: mint.clone(),
-            amount: amount.to_string(),
-            timestamp: chrono::Utc::now().timestamp_millis(),
-        };
-        let _ = tx.send(wal_entry);
-    }
+    // WAL 메시지는 executor.lock_balance_for_order에서 발행하므로 여기서는 제거 (중복 방지)
     
     // 잔고 잠금
     match executor.lock_balance_for_order(0, user_id, &mint, amount) {
         Ok(()) => {
+            // DB Writer로 잔고 업데이트 명령 전송 (available 감소, locked 증가)
+            if let Some(tx) = db_tx {
+                let db_cmd = super::db_commands::DbCommand::UpdateBalance {
+                    user_id,
+                    mint: mint.clone(),
+                    available_delta: Some(-amount), // available 감소
+                    locked_delta: Some(amount), // locked 증가
+                };
+                let _ = tx.send(db_cmd);
+            }
+            
             let _ = response.send(Ok(()));
         }
         Err(e) => {
@@ -859,6 +866,7 @@ fn handle_unlock_balance(
     amount: rust_decimal::Decimal,
     response: tokio::sync::oneshot::Sender<Result<()>>,
     wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
+    db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     executor: &Arc<Mutex<Executor>>,
 ) {
     let mut executor = executor.lock();
@@ -876,6 +884,17 @@ fn handle_unlock_balance(
     // 잔고 잠금 해제
     match executor.unlock_balance_for_cancel(0, user_id, &mint, amount) {
         Ok(()) => {
+            // DB Writer로 잔고 업데이트 명령 전송 (locked 감소, available 증가)
+            if let Some(tx) = db_tx {
+                let db_cmd = super::db_commands::DbCommand::UpdateBalance {
+                    user_id,
+                    mint: mint.clone(),
+                    available_delta: Some(amount), // available 증가
+                    locked_delta: Some(-amount), // locked 감소
+                };
+                let _ = tx.send(db_cmd);
+            }
+            
             let _ = response.send(Ok(()));
         }
         Err(e) => {
