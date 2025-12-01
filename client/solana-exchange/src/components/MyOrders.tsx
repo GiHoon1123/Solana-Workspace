@@ -9,6 +9,7 @@ interface MyOrdersProps {
 
 export default function MyOrders({ filterStatus }: MyOrdersProps) {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [tradesByOrderId, setTradesByOrderId] = useState<Map<number, Trade[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<number | null>(null);
@@ -63,6 +64,31 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       setOrders(sortedOrders);
+
+      // 체결 탭인 경우, 각 주문의 Trade 데이터 가져오기 (시장가 매수 총액 계산용)
+      if (filterStatus?.includes('filled')) {
+        const tradesMap = new Map<number, Trade[]>();
+        
+        // 각 주문의 Trade 데이터 가져오기
+        const tradePromises = sortedOrders.map(async (order) => {
+          try {
+            // 내 체결 내역에서 해당 주문 ID의 Trade 찾기
+            const myTrades = await apiClient.getMyTrades('SOL', 1000, 0);
+            const orderTrades = myTrades.filter(trade => 
+              (order.order_type === 'buy' && trade.buy_order_id === order.id) ||
+              (order.order_type === 'sell' && trade.sell_order_id === order.id)
+            );
+            if (orderTrades.length > 0) {
+              tradesMap.set(order.id, orderTrades);
+            }
+          } catch (err) {
+            console.error(`주문 ${order.id}의 Trade 데이터 가져오기 실패:`, err);
+          }
+        });
+        
+        await Promise.all(tradePromises);
+        setTradesByOrderId(tradesMap);
+      }
     } catch (err) {
       console.error('주문 목록 가져오기 실패:', err);
       setError(err instanceof Error ? err.message : '주문 목록을 불러올 수 없습니다.');
@@ -201,49 +227,118 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
                     <span className="text-xs text-gray-400">{formatDate(order.created_at)}</span>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs mb-2">
-                    <div>
-                      <span className="text-gray-400">가격:</span>
-                      <span className="text-white ml-2">
-                        {order.price ? `$${parseFloat(order.price).toFixed(2)}` : '시장가'}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">수량:</span>
-                      <span className="text-white ml-2">
-                        {order.order_side === 'market' && order.order_type === 'buy' && parseFloat(order.amount) === 0
-                          ? '매칭 대기 중'
-                          : `${parseFloat(order.amount).toFixed(4)} SOL`}
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">체결:</span>
-                      <span className="text-white ml-2">
-                        {parseFloat(order.filled_amount).toFixed(4)} SOL
-                      </span>
-                    </div>
-                    <div>
-                      <span className="text-gray-400">체결률:</span>
-                      <span className="text-white ml-2">
-                        {order.order_side === 'market' && order.order_type === 'buy' && parseFloat(order.amount) === 0
-                          ? '계산 중'
-                          : `${filledPercent.toFixed(1)}%`}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* 체결 진행률 바 */}
-                  {order.status !== 'cancelled' && order.status !== 'filled' && (
-                    <div className="mb-2">
-                      <div className="w-full bg-gray-700 rounded-full h-1.5">
-                        <div
-                          className={`h-1.5 rounded-full ${
-                            isBuy ? 'bg-red-400' : 'bg-blue-400'
-                          }`}
-                          style={{ width: `${Math.min(filledPercent, 100)}%` }}
-                        />
+                  {/* 체결 탭에서는 수량/체결률 제거, 미체결 탭에서는 표시 */}
+                  {filterStatus?.includes('filled') ? (
+                    // 체결 탭: 시장가 매수는 입력 금액/결제 금액, 그 외는 가격/총액
+                    (() => {
+                      const isMarketBuy = order.order_side === 'market' && order.order_type === 'buy';
+                      const trades = tradesByOrderId.get(order.id) || [];
+                      
+                      // 시장가 매수: Trade 데이터로 총 결제 금액 계산
+                      let totalPaid = 0;
+                      if (isMarketBuy && trades.length > 0) {
+                        totalPaid = trades.reduce((sum, trade) => 
+                          sum + (parseFloat(trade.price) * parseFloat(trade.amount)), 0
+                        );
+                      }
+                      
+                      // 지정가 주문 또는 시장가 매도: 가격 × 체결 수량
+                      const totalAmount = order.price && parseFloat(order.filled_amount) > 0
+                        ? parseFloat(order.price) * parseFloat(order.filled_amount)
+                        : 0;
+                      
+                      return (
+                        <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                          {isMarketBuy ? (
+                            <>
+                              <div>
+                                <span className="text-gray-400">체결 수량:</span>
+                                <span className="text-white ml-2">
+                                  {parseFloat(order.filled_amount) > 0
+                                    ? `${parseFloat(order.filled_amount).toFixed(4)} SOL`
+                                    : '--'}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">결제 금액:</span>
+                                <span className="text-white ml-2">
+                                  {trades.length > 0 
+                                    ? `$${totalPaid.toFixed(2)}`
+                                    : parseFloat(order.filled_amount) > 0
+                                    ? '계산 중...'
+                                    : '--'}
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div>
+                                <span className="text-gray-400">가격:</span>
+                                <span className="text-white ml-2">
+                                  {order.price ? `$${parseFloat(order.price).toFixed(2)}` : '시장가'}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-gray-400">총액:</span>
+                                <span className="text-white ml-2">
+                                  {totalAmount > 0 
+                                    ? `$${totalAmount.toFixed(2)}`
+                                    : '--'}
+                                </span>
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    // 미체결 탭: 수량, 체결, 체결률 표시
+                    <>
+                      <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+                        <div>
+                          <span className="text-gray-400">가격:</span>
+                          <span className="text-white ml-2">
+                            {order.price ? `$${parseFloat(order.price).toFixed(2)}` : '시장가'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">수량:</span>
+                          <span className="text-white ml-2">
+                            {order.order_side === 'market' && order.order_type === 'buy' && parseFloat(order.amount) === 0
+                              ? '매칭 대기 중'
+                              : `${parseFloat(order.amount).toFixed(4)} SOL`}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">체결:</span>
+                          <span className="text-white ml-2">
+                            {parseFloat(order.filled_amount).toFixed(4)} SOL
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-gray-400">체결률:</span>
+                          <span className="text-white ml-2">
+                            {order.order_side === 'market' && order.order_type === 'buy' && parseFloat(order.amount) === 0
+                              ? '계산 중'
+                              : `${filledPercent.toFixed(1)}%`}
+                          </span>
+                        </div>
                       </div>
-                    </div>
+
+                      {/* 체결 진행률 바 */}
+                      {order.status !== 'cancelled' && order.status !== 'filled' && (
+                        <div className="mb-2">
+                          <div className="w-full bg-gray-700 rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full ${
+                                isBuy ? 'bg-red-400' : 'bg-blue-400'
+                              }`}
+                              style={{ width: `${Math.min(filledPercent, 100)}%` }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {/* 취소 버튼 */}
