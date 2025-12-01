@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { apiClient, Balance, CreateOrderRequest } from '@/lib/api';
-import { useAlert } from './AlertToast';
+import { useAlert } from './AlertModal';
 
 type OrderType = 'buy' | 'sell';
 type OrderSide = 'limit' | 'market';

@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { apiClient, UserResponse, Balance } from '@/lib/api';
 import { useRouter } from 'next/navigation';
-import { useAlert } from '@/components/AlertToast';
+import { useAlert } from '@/components/AlertModal';
 
 interface Wallet {
   id: number;
