@@ -430,6 +430,7 @@ export interface Order {
   price: string | null;
   amount: string;
   filled_amount: string;
+  filled_quote_amount: string;
   status: 'pending' | 'partial' | 'filled' | 'cancelled';
   created_at: string;
   updated_at: string;

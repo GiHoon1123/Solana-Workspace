@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { apiClient, Order, Trade } from '@/lib/api';
+import { apiClient, Order } from '@/lib/api';
 
 interface MyOrdersProps {
   filterStatus?: string[]; // 필터링할 상태 목록 (예: ['pending', 'partial'] 또는 ['filled'])
@@ -9,7 +9,6 @@ interface MyOrdersProps {
 
 export default function MyOrders({ filterStatus }: MyOrdersProps) {
   const [orders, setOrders] = useState<Order[]>([]);
-  const [tradesByOrderId, setTradesByOrderId] = useState<Map<number, Trade[]>>(new Map());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<number | null>(null);
@@ -64,34 +63,6 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
         new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
       );
       setOrders(sortedOrders);
-
-      // 체결 탭인 경우, 각 주문의 Trade 데이터 가져오기 (시장가 주문 총액 계산용)
-      if (filterStatus?.includes('filled')) {
-        const tradesMap = new Map<number, Trade[]>();
-        
-        // 모든 Trade 데이터를 한 번만 가져오기 (성능 최적화)
-        try {
-          const myTrades = await apiClient.getMyTrades('SOL', 1000, 0);
-          
-          // 각 주문에 해당하는 Trade 찾기
-          sortedOrders.forEach((order) => {
-            // 시장가 주문만 Trade 데이터 필요
-            if (order.order_side === 'market') {
-              const orderTrades = myTrades.filter(trade => 
-                (order.order_type === 'buy' && trade.buy_order_id === order.id) ||
-                (order.order_type === 'sell' && trade.sell_order_id === order.id)
-              );
-              if (orderTrades.length > 0) {
-                tradesMap.set(order.id, orderTrades);
-              }
-            }
-          });
-        } catch (err) {
-          console.error('Trade 데이터 가져오기 실패:', err);
-        }
-        
-        setTradesByOrderId(tradesMap);
-      }
     } catch (err) {
       console.error('주문 목록 가져오기 실패:', err);
       setError(err instanceof Error ? err.message : '주문 목록을 불러올 수 없습니다.');
@@ -232,22 +203,16 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
 
                   {/* 체결 탭에서는 수량/체결률 제거, 미체결 탭에서는 표시 */}
                   {filterStatus?.includes('filled') ? (
-                    // 체결 탭: 시장가 주문은 Trade 데이터로 계산, 지정가는 가격 × 체결 수량
+                    // 체결 탭: filled_quote_amount 사용 (시장가/지정가 모두)
                     (() => {
                       const isMarket = order.order_side === 'market';
                       const isMarketBuy = isMarket && order.order_type === 'buy';
                       const isMarketSell = isMarket && order.order_type === 'sell';
-                      const trades = tradesByOrderId.get(order.id) || [];
                       
-                      // 시장가 주문: Trade 데이터로 총액 계산
-                      let totalFromTrades = 0;
-                      if (isMarket && trades.length > 0) {
-                        totalFromTrades = trades.reduce((sum, trade) => 
-                          sum + (parseFloat(trade.price) * parseFloat(trade.amount)), 0
-                        );
-                      }
+                      // filled_quote_amount 사용 (백엔드에서 계산된 값)
+                      const filledQuoteAmount = parseFloat(order.filled_quote_amount) || 0;
                       
-                      // 지정가 주문: 가격 × 체결 수량
+                      // 지정가 주문: 가격 × 체결 수량 (참고용, filled_quote_amount가 0일 때만)
                       const totalFromPrice = order.price && parseFloat(order.filled_amount) > 0
                         ? parseFloat(order.price) * parseFloat(order.filled_amount)
                         : 0;
@@ -267,8 +232,8 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
                               <div>
                                 <span className="text-gray-400">결제 금액:</span>
                                 <span className="text-white ml-2">
-                                  {totalFromTrades > 0 
-                                    ? `$${totalFromTrades.toFixed(2)}`
+                                  {filledQuoteAmount > 0
+                                    ? `$${filledQuoteAmount.toFixed(2)}`
                                     : parseFloat(order.filled_amount) > 0
                                     ? '계산 중...'
                                     : '--'}
@@ -288,8 +253,8 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
                               <div>
                                 <span className="text-gray-400">총액:</span>
                                 <span className="text-white ml-2">
-                                  {totalFromTrades > 0 
-                                    ? `$${totalFromTrades.toFixed(2)}`
+                                  {filledQuoteAmount > 0
+                                    ? `$${filledQuoteAmount.toFixed(2)}`
                                     : parseFloat(order.filled_amount) > 0
                                     ? '계산 중...'
                                     : '--'}
@@ -307,7 +272,9 @@ export default function MyOrders({ filterStatus }: MyOrdersProps) {
                               <div>
                                 <span className="text-gray-400">총액:</span>
                                 <span className="text-white ml-2">
-                                  {totalFromPrice > 0 
+                                  {filledQuoteAmount > 0
+                                    ? `$${filledQuoteAmount.toFixed(2)}`
+                                    : totalFromPrice > 0
                                     ? `$${totalFromPrice.toFixed(2)}`
                                     : '--'}
                                 </span>
