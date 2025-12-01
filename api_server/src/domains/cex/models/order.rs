@@ -1,7 +1,29 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, Deserializer, Serializer};
 use utoipa::ToSchema;
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
+
+// =====================================================
+// ID 직렬화 헬퍼 함수 (JavaScript 정밀도 손실 방지)
+// =====================================================
+/// u64를 문자열로 직렬화 (JavaScript 정밀도 손실 방지)
+/// Serialize u64 as string to avoid precision loss in JavaScript
+fn serialize_u64_as_string<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_string())
+}
+
+/// 문자열을 u64로 역직렬화
+/// Deserialize string to u64
+fn deserialize_string_to_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    s.parse::<u64>().map_err(serde::de::Error::custom)
+}
 
 // =====================================================
 // Order 모델
@@ -27,6 +49,10 @@ use rust_decimal::Decimal;
 pub struct Order {
     /// Order ID (BIGSERIAL, auto-generated)
     /// 주문 ID (DB에서 자동 생성)
+    /// Serialized as string to avoid precision loss in JavaScript
+    /// JavaScript 정밀도 손실 방지를 위해 문자열로 직렬화
+    #[serde(serialize_with = "serialize_u64_as_string", deserialize_with = "deserialize_string_to_u64")]
+    #[schema(value_type = String, example = "1850278129743992082")]
     pub id: u64,
 
     /// User ID (who created this order)
