@@ -189,16 +189,17 @@ impl OrderService {
             created_at: Utc::now(),
         };
         
-        // 엔진에 제출 (즉시 매칭 시도, 마이크로초 단위)
+        // 엔진에 제출 (비동기 처리, 백그라운드에서 처리)
+        // 실제 거래소와 동일하게 주문을 즉시 반환하고 백그라운드에서 처리
         // 엔진이 내부적으로 WAL 기록 + DB 동기화 처리
         // 주의: DB에 이미 주문이 있으므로, 엔진의 DB Writer는 InsertOrder를 보내지 않음
-        let _matches = {
-            let engine_guard = self.engine.lock().await;
-            engine_guard
-                .submit_order(order_entry.clone())
-                .await
-                .context("Failed to submit order to engine")?
-        };
+        let engine_clone = self.engine.clone();
+        tokio::spawn(async move {
+            let engine_guard = engine_clone.lock().await;
+            if let Err(e) = engine_guard.submit_order(order_entry).await {
+                eprintln!("[Order Service] Failed to submit order to engine (async): {}", e);
+            }
+        });
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 6. Order 객체 반환

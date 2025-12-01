@@ -130,14 +130,14 @@ impl PositionService {
             let value = market_price * current_balance;
             
             // 미실현 손익 = 현재 평가액 - (평균 매수가 × 현재 보유 수량)
-            // 주의: 현재 보유 수량이 총 매수 수량보다 적을 수 있음 (일부 매도한 경우)
-            // 따라서 총 매수 금액 대비 현재 평가액을 기준으로 계산
-            let pnl = value - (average_entry_price.unwrap() * current_balance);
+            let avg_price = average_entry_price.unwrap();
+            let pnl = value - (avg_price * current_balance);
             
-            // 수익률 = (미실현 손익 / 총 매수 금액) × 100
-            // 주의: 총 매수 금액이 0이면 나눗셈 불가
-            let pnl_percent = if !total_bought_cost.is_zero() {
-                Some((pnl / total_bought_cost) * Decimal::from(100))
+            // 수익률 = (현재 가격 - 평균 매수가) / 평균 매수가 × 100
+            // 이렇게 하면 초기 입금과 관계없이 정확한 수익률 계산 가능
+            // 예: 평균 매수가 $100, 현재가 $110 → 수익률 = (110-100)/100 × 100 = 10%
+            let pnl_percent = if !avg_price.is_zero() {
+                Some(((market_price - avg_price) / avg_price) * Decimal::from(100))
             } else {
                 None
             };
