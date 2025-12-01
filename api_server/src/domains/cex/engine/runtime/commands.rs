@@ -36,7 +36,7 @@ pub enum OrderCommand {
     /// 5. MatchResult 목록을 response로 전송
     SubmitOrder {
         order: OrderEntry,
-        response: oneshot::Sender<Result<Vec<MatchResult>>>,
+        response: Option<oneshot::Sender<Result<Vec<MatchResult>>>>,
     },
     
     /// 주문 취소

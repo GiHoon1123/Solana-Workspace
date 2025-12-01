@@ -718,26 +718,24 @@ impl Engine for HighPerformanceEngine {
     /// 주문 제출
     /// 
     /// # 처리 과정
-    /// 1. oneshot 채널 생성
-    /// 2. OrderCommand::SubmitOrder 생성
-    /// 3. 엔진 스레드로 전송
-    /// 4. 결과 대기 (타임아웃: 100ms)
-    async fn submit_order(&self, order: OrderEntry) -> Result<Vec<MatchResult>> {
-        let (tx, rx) = oneshot::channel();
-        
+    /// 1. OrderCommand::SubmitOrder 생성 (response: None)
+    /// 2. 엔진 스레드로 전송
+    /// 3. 즉시 반환 (응답을 기다리지 않음)
+    /// 
+    /// # 주의사항
+    /// - 주문은 엔진이 백그라운드에서 처리됨
+    /// - 주문 상태는 DB에서 확인 가능
+    async fn submit_order(&self, order: OrderEntry) -> Result<()> {
         let cmd = OrderCommand::SubmitOrder {
             order,
-            response: tx,
+            response: None,  // 응답을 기다리지 않음
         };
         
         self.order_tx.as_ref().unwrap().send(cmd)
             .map_err(|e| anyhow::anyhow!("Failed to send order to engine: {}", e))?;
         
-        // 결과 대기 (타임아웃: 100ms)
-        timeout(Duration::from_millis(100), rx)
-            .await
-            .map_err(|_| anyhow::anyhow!("Order submission timeout"))?
-            .map_err(|e| anyhow::anyhow!("Failed to receive response: {}", e))?
+        // 즉시 반환 (엔진이 백그라운드에서 처리)
+        Ok(())
     }
     
     /// 주문 취소

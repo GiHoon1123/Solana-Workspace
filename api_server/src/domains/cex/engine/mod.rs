@@ -119,7 +119,7 @@ pub trait Engine: Send + Sync {
     ///     println!("{}건 체결됨", matches.len());
     /// }
     /// ```
-    async fn submit_order(&self, order: OrderEntry) -> Result<Vec<MatchResult>>;
+    async fn submit_order(&self, order: OrderEntry) -> Result<()>;
 
     /// 주문 취소
     /// Cancel order

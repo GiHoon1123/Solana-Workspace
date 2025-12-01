@@ -20,10 +20,10 @@ impl MockEngine {
 
 #[async_trait]
 impl Engine for MockEngine {
-    async fn submit_order(&self, _order: OrderEntry) -> Result<Vec<MatchResult>> {
+    async fn submit_order(&self, _order: OrderEntry) -> Result<()> {
         // TODO: 실제 매칭 로직 구현 필요
-        // 일단 빈 벡터 반환 (체결 없음)
-        Ok(Vec::new())
+        // 일단 성공으로 반환 (체결 없음)
+        Ok(())
     }
 
     async fn cancel_order(

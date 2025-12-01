@@ -360,7 +360,7 @@ pub fn engine_thread_loop(
 /// 5. MatchResult 목록을 response로 전송
 fn handle_submit_order(
     order: OrderEntry,
-    response: tokio::sync::oneshot::Sender<Result<Vec<MatchResult>>>,
+    response: Option<tokio::sync::oneshot::Sender<Result<Vec<MatchResult>>>>,
     wal_tx: Option<&crossbeam::channel::Sender<WalEntry>>,
     db_tx: Option<&crossbeam::channel::Sender<super::db_commands::DbCommand>>,
     orderbooks: &Arc<RwLock<HashMap<TradingPair, OrderBook>>>,
@@ -368,7 +368,11 @@ fn handle_submit_order(
     executor: &Arc<Mutex<Executor>>,
 ) {
     let result = process_submit_order(order, wal_tx, db_tx, orderbooks, matcher, executor);
-    let _ = response.send(result);
+    
+    // response가 Some인 경우만 응답 전송 (비동기 처리 시 None)
+    if let Some(tx) = response {
+        let _ = tx.send(result);
+    }
 }
 
 pub(crate) fn process_submit_order(
