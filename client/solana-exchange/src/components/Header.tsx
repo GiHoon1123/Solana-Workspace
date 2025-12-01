@@ -49,6 +49,12 @@ export default function Header() {
               {isAuthenticated ? (
                 <>
                   <Link
+                    href="/trades"
+                    className="text-gray-300 hover:text-white px-4 py-2 transition-colors"
+                  >
+                    거래내역
+                  </Link>
+                  <Link
                     href="/mypage"
                     className="text-gray-300 hover:text-white px-4 py-2 transition-colors"
                   >
