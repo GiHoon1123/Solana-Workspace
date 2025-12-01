@@ -168,9 +168,9 @@ export default function OrderBook() {
       
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {/* 매도 호가 */}
-        <div className="flex-shrink-0 mb-3">
-          <div className="text-xs text-blue-400 font-semibold mb-2">매도</div>
-          <div className="space-y-0.5 max-h-32 overflow-y-auto">
+        <div className="flex-1 min-h-0 flex flex-col">
+          <div className="text-xs text-blue-400 font-semibold mb-2 flex-shrink-0">매도</div>
+          <div className="flex-1 overflow-y-auto space-y-0.5">
             {sellOrders.map((order, index) => (
               <div
                 key={`sell-${index}`}
@@ -197,7 +197,7 @@ export default function OrderBook() {
           </div>
           <div
             className={`text-xs mt-1 ${
-              priceChange >= 0 ? 'text-blue-400' : 'text-red-400'
+              priceChange >= 0 ? 'text-red-400' : 'text-blue-400'
             }`}
           >
             {currentPrice > 0 && (

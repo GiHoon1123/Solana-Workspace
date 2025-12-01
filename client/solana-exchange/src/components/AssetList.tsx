@@ -295,19 +295,25 @@ export default function AssetList() {
                   {/* 보유 수량 */}
                   <div className="mb-2">
                     <div className="flex items-center justify-between text-xs mb-1">
-                      <span className="text-gray-400">보유</span>
+                      <span className="text-gray-400">사용 가능</span>
                       <span className="text-white font-medium">
-                        {formatNumber(position.current_balance, 4)} {position.mint}
+                        {formatNumber(position.available, position.mint === 'USDT' ? 2 : 4)} {position.mint}
                       </span>
                     </div>
                     {parseFloat(position.locked) > 0 && (
-                      <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center justify-between text-xs mb-1">
                         <span className="text-gray-500">잠김</span>
                         <span className="text-gray-500">
-                          {formatNumber(position.locked, 4)} {position.mint}
+                          {formatNumber(position.locked, position.mint === 'USDT' ? 2 : 4)} {position.mint}
                         </span>
                       </div>
                     )}
+                    <div className="flex items-center justify-between text-xs pt-1 border-t border-gray-700">
+                      <span className="text-gray-400">총 보유</span>
+                      <span className="text-gray-300">
+                        {formatNumber(position.current_balance, position.mint === 'USDT' ? 2 : 4)} {position.mint}
+                      </span>
+                    </div>
                   </div>
 
                   {/* 평가액 */}

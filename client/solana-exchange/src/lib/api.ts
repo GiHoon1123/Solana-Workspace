@@ -295,6 +295,40 @@ class ApiClient {
     });
   }
 
+  // CEX Orders API
+  async createOrder(request: CreateOrderRequest): Promise<Order> {
+    return this.request<Order>('/api/cex/orders', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    });
+  }
+
+  async getMyOrders(status?: string, limit?: number, offset?: number): Promise<Order[]> {
+    const params = new URLSearchParams();
+    if (status) params.append('status', status);
+    if (limit) params.append('limit', limit.toString());
+    if (offset) params.append('offset', offset.toString());
+    
+    const queryString = params.toString();
+    const endpoint = `/api/cex/orders/my${queryString ? `?${queryString}` : ''}`;
+    
+    return this.request<Order[]>(endpoint, {
+      method: 'GET',
+    });
+  }
+
+  async cancelOrder(orderId: number): Promise<Order> {
+    return this.request<Order>(`/api/cex/orders/${orderId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  async getOrder(orderId: number): Promise<Order> {
+    return this.request<Order>(`/api/cex/orders/${orderId}`, {
+      method: 'GET',
+    });
+  }
+
   // CEX Trades API
   async getMyTrades(mint?: string, limit?: number, offset?: number): Promise<Trade[]> {
     const params = new URLSearchParams();
@@ -371,6 +405,32 @@ export interface Balance {
   mint_address: string;
   available: string;
   locked: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// CEX Orders 타입
+export interface CreateOrderRequest {
+  order_type: 'buy' | 'sell';
+  order_side: 'limit' | 'market';
+  base_mint: string;
+  quote_mint?: string;
+  price?: string; // 지정가 주문만
+  amount?: string; // 지정가 매수, 모든 매도
+  quote_amount?: string; // 시장가 매수만
+}
+
+export interface Order {
+  id: number;
+  user_id: number;
+  order_type: string;
+  order_side: string;
+  base_mint: string;
+  quote_mint: string;
+  price: string | null;
+  amount: string;
+  filled_amount: string;
+  status: 'pending' | 'partial' | 'filled' | 'cancelled';
   created_at: string;
   updated_at: string;
 }
